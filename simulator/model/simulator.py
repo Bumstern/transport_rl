@@ -149,7 +149,7 @@ class Simulator:
     def __get_copy_of_trucks(self) -> list[Truck]:
         copied_trucks = []
         for truck in self._env.trucks:
-            copied_truck = copy.copy(truck)
+            copied_truck = truck.model_copy(deep=True)
             copied_trucks.append(copied_truck)
         return copied_trucks
 
@@ -183,7 +183,7 @@ class Simulator:
                     current_time = self._save_state(request_time=request_time, current_time=current_time)
                 else:
                     # Откатываем изменения, если заказ не выполнен
-                    count_of_missed_requests = self._reset_state(
+                    truck, count_of_missed_requests = self._reset_state(
                         truck=truck,
                         saved_position=saved_position,
                         count_of_missed_requests=count_of_missed_requests

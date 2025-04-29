@@ -53,6 +53,8 @@ class RouteManager:
             destination_point: Point
     ) -> float:
         route = self.find_route(request, departure_point, destination_point)
+        if route is None:
+            return 0
         return route.properties.distance
 
     def calculate_travel_time_to_point(

@@ -38,4 +38,4 @@ class TaskManager:
     #     return  first_request_index
 
     def iter_by(self, truck_name: str):
-        return self._requests_per_truck[truck_name].copy()
+        return self._requests_per_truck.get(truck_name, []).copy()

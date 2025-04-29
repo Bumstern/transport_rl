@@ -2,10 +2,7 @@ from pydantic import BaseModel, ConfigDict
 
 
 class Point(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
     name: str
-
 
 class RoutePoint(Point):
     pass

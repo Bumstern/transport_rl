@@ -21,17 +21,13 @@ class Entities:
             print(e.json())
             raise
 
-    @singledispatchmethod
     def __getitem__(self, index):
-        raise NotImplementedError('Unsupported type')
-
-    @__getitem__.register
-    def __getitem__(self, index: int):
-        return self.__list_by_id[index]
-
-    @__getitem__.register
-    def _(self, index: str):
-        return self.__named_dict[index]
+        if isinstance(index, int):
+            return self.__list_by_id[index]
+        elif isinstance(index, str):
+            return self.__named_dict[index]
+        else:
+            raise NotImplementedError('Unsupported type')
 
     def __iter__(self):
         self.__remaining_requests = deque(self.__list_by_id)
@@ -42,3 +38,6 @@ class Entities:
             return self.__remaining_requests.popleft()
         except:
             raise StopIteration
+
+    def __len__(self):
+        return len(self.__list_by_id)

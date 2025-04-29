@@ -16,9 +16,9 @@ class Properties(BaseModel):
     distance: float
     points: list[RoutePoint]
 
-    @field_validator("points", mode="after")
-    def __init_points(self, points: list[RoutePoint]) -> list[RoutePoint]:
-        return sorted(points, key=lambda x: x.name)
+    # @field_validator("points", mode="after")
+    # def __init_points(self, points: list[RoutePoint]) -> list[RoutePoint]:
+    #     return sorted(points, key=lambda x: x.name)
 
     @property
     def name(self) -> str:
@@ -26,7 +26,6 @@ class Properties(BaseModel):
 
 
 class Route(BaseModel):
-    id: int
     type: str
     geometry: Geometry
     properties: Properties

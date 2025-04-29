@@ -9,7 +9,7 @@ class Position(BaseModel):
     current_point: Point
 
     def set_current_point(self, point: Point):
-        current_point = point.name
+        self.current_point.name = point.name
 
 class CargoParams(BaseModel):
     model_config = ConfigDict(frozen=True)
@@ -44,8 +44,3 @@ class Truck(BaseModel):
     position: Position
     cargo_params: CargoParams
     moving_params: MovingParams
-
-    def __copy__(self):
-        copied_position = self.position.model_copy(deep=True)
-        copied_truck = self.model_copy(update=copied_position.model_dump())
-        return copied_truck

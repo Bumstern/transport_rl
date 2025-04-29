@@ -1,3 +1,4 @@
+import datetime
 from typing import Union
 import datetime as dt
 
@@ -5,7 +6,7 @@ import datetime as dt
 class Time:
     def __init__(self, date_start: str):
         self._date_format = "%Y-%m-%d %H:%M:%S"
-        self._date_start = date_start
+        self._date_start = datetime.datetime.strptime(date_start, self._date_format)
         self._periods_per_day = 24
 
     def __str2datetime(self, datetime_str: str, format: str):
