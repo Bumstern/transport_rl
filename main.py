@@ -139,9 +139,8 @@ def main():
     )
     env = SimulatorEnv(generator)
 
-    print(model_eval("output/models/best/best_model_600k.zip", env, 25))
+    # print(model_eval("output/models/best/best_model_600k.zip", env, 25))
 
-    """
     model = PPO(
         "MultiInputPolicy",
         env,
@@ -153,6 +152,7 @@ def main():
             "net_arch": [128] * 5
         }
     )
+
     eval_callback = EvalCallback(
         env, best_model_save_path="output/models/best",
         log_path="output/logs/tensorboard", eval_freq=2048,
@@ -165,15 +165,6 @@ def main():
         callback=[eval_callback, info_logger_callback]
     )
     model.save(f"output/models/{str(datetime.today())}.zip")
-
-    # obs, info = env.reset()
-    # print(info)
-    # action, _ = model.predict(obs)
-    # obs, reward, _, _, info = env.step(action)
-    # print(info)
-    # print(reward)
-    # print(obs)
-    """
 
 
 if __name__ == '__main__':
