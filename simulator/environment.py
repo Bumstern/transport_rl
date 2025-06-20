@@ -10,6 +10,7 @@ from simulator.units.truck import Truck
 class Environment(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed = True)
 
+    end_date: int
     route_manager: RouteManager
     trucks: Entities
     requests: Entities

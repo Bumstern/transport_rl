@@ -11,8 +11,8 @@ from simulator.units.truck import Truck, Position
 
 
 class Simulator:
-    def __init__(self, env: Environment):
-        self._env = env
+    def __init__(self):
+        self._env = None
 
     def _request_simulation(
             self,
@@ -139,12 +139,13 @@ class Simulator:
     def _reset_state(
             self,
             truck: Truck,
+            request: Request,
             saved_position: Position,
-            count_of_missed_requests: int
+            missed_requests_ids: list[int],
     ) -> (Truck, int):
         truck.position = saved_position
-        count_of_missed_requests += 1
-        return truck, count_of_missed_requests
+        missed_requests_ids.append(request.id)
+        return truck
 
     def __get_copy_of_trucks(self) -> list[Truck]:
         copied_trucks = []
@@ -153,14 +154,21 @@ class Simulator:
             copied_trucks.append(copied_truck)
         return copied_trucks
 
-    def run(self, selection: tuple[int]):
+    def run(self, selection: tuple[int], env: Environment) -> list[int]:
+        self._env = env
+
         # Присваиваем каждой машине список своих заказов с помощью TaskManager
         task_manager = TaskManager(selection, self._env)
 
         # Получаем копии машин, чтобы не изменить их в env
         trucks = self.__get_copy_of_trucks()
 
-        count_of_missed_requests = 0
+        # Собираем все id пропущенных задач
+        missed_requests_ids = []
+        for request_id, truck_id in enumerate(selection):
+            if truck_id == -1:
+                missed_requests_ids.append(request_id)
+
         # В цикле по каждой машине
         for truck in trucks:
             truck: Truck
@@ -183,10 +191,11 @@ class Simulator:
                     current_time = self._save_state(request_time=request_time, current_time=current_time)
                 else:
                     # Откатываем изменения, если заказ не выполнен
-                    truck, count_of_missed_requests = self._reset_state(
+                    truck = self._reset_state(
                         truck=truck,
+                        request=request,
                         saved_position=saved_position,
-                        count_of_missed_requests=count_of_missed_requests
+                        missed_requests_ids=missed_requests_ids
                     )
 
-        return count_of_missed_requests
+        return missed_requests_ids

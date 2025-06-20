@@ -26,6 +26,11 @@ class Entities:
             return self.__list_by_id[index]
         elif isinstance(index, str):
             return self.__named_dict[index]
+        elif isinstance(index, float):
+            if index == int(index):
+                return self.__list_by_id[int(index)]
+            else:
+                raise ValueError('Float index')
         else:
             raise NotImplementedError('Unsupported type')
 

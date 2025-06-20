@@ -1,10 +1,11 @@
 import copy
 import datetime
 import json
+import os
 import random
 
 
-class Generator:
+class InputDataGenerator:
 
     def __init__(
             self,
@@ -22,6 +23,7 @@ class Generator:
         self._unload_point_names = unload_point_names
         self._requests_num = requests_num
         self._simulator_start_date = simulator_start_date
+        self._simulator_end_date = simulator_end_date
         self._trucks_num = trucks_num
         self._capacities_variants = capacities_variants
         self._max_simulator_duration_in_hours = (simulator_end_date - simulator_start_date).days * 24
@@ -37,7 +39,7 @@ class Generator:
         window_end = window_start + datetime.timedelta(hours=duration_in_hours)
         return window_start, window_end
 
-    def _generate_requests(self) -> list[dict]:
+    def generate_requests(self) -> list[dict]:
         request_structure = {
             'info': {
                 'name': ''
@@ -63,15 +65,15 @@ class Generator:
                 time_gap_from_start_in_hours=random.randint(0, self._max_simulator_duration_in_hours),
                 duration_in_hours=random.randint(5, 12)
             )
-            new_request['point_to_load']['date_start_window'] = window_start
-            new_request['point_to_load']['date_end_window'] = window_end
+            new_request['point_to_load']['date_start_window'] = str(window_start)
+            new_request['point_to_load']['date_end_window'] = str(window_end)
             new_request['point_to_unload']['name'] = random.choice(self._unload_point_names)
             new_request['fix_route'] = None
             new_request['volume'] = random.choice(self._capacities_variants)
             requests.append(new_request)
         return requests
 
-    def _generate_trucks(self) -> list[dict]:
+    def generate_trucks(self) -> list[dict]:
         truck_structure = {
             'info': {
                 'name': ''
@@ -105,7 +107,7 @@ class Generator:
             trucks.append(new_truck)
         return trucks
 
-    def _generate_routes(self):
+    def generate_routes(self):
         route_structure = {
             'type': 'Feature',
             'geometry': {
@@ -131,19 +133,23 @@ class Generator:
                 routes.append(new_route)
         return routes
 
-    def generate_input_file(self, file_path: str):
+    def generate_all(self, dir_path: str | None) -> (dict, list[dict]):
         generated_file = {}
         generated_file['time'] = {
-            'simulator_start_date': self._simulator_start_date
+            'simulator_start_date': str(self._simulator_start_date),
+            'simulator_end_date': str(self._simulator_end_date)
         }
-        generated_file['trucks'] = self._generate_trucks()
-        generated_file['requests'] = self._generate_requests()
+        generated_file['trucks'] = self.generate_trucks()
+        generated_file['requests'] = self.generate_requests()
 
-        with open(file_path, 'w') as f:
-            json.dump(generated_file, f, default=str)
+        if dir_path is not None:
+            with open(os.path.join(dir_path, 'input.json'), 'w') as f:
+                json.dump(generated_file, f, default=str)
 
-    def generate_route_file(self, file_path: str):
-        routes_data = self._generate_routes()
+        routes_data = self.generate_routes()
 
-        with open(file_path, 'w') as f:
-            json.dump(routes_data, f, default=str)
+        if dir_path is not None:
+            with open(os.path.join(dir_path, 'routes.json'), 'w') as f:
+                json.dump(routes_data, f, default=str)
+        
+        return generated_file, routes_data

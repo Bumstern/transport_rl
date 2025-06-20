@@ -4,9 +4,10 @@ import datetime as dt
 
 
 class Time:
-    def __init__(self, date_start: str):
+    def __init__(self, date_start: str, date_end: str):
         self._date_format = "%Y-%m-%d %H:%M:%S"
         self._date_start = datetime.datetime.strptime(date_start, self._date_format)
+        self._date_end = datetime.datetime.strptime(date_end, self._date_format)
         self._periods_per_day = 24
 
     def __str2datetime(self, datetime_str: str, format: str):
@@ -79,3 +80,7 @@ class Time:
     def transition_to_periods(self, input_data: dict) -> dict:
         self.__replace_date(input_data)
         return input_data
+
+    @property
+    def end_period(self):
+        return (self._date_end - self._date_start).days * 24
