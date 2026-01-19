@@ -15,6 +15,10 @@ class Environment(BaseModel):
     trucks: Entities
     requests: Entities
 
+    @property
+    def requests_num(self):
+        return len(self.requests)
+
     @field_validator("trucks", mode="before")
     @classmethod
     def __init_trucks(cls, data: list[dict]) -> Entities:

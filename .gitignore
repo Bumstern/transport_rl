@@ -4,3 +4,5 @@ output
 __pycache__
 test.py
 .env
+.ipynb_checkpoints
+Untitled.ipynb

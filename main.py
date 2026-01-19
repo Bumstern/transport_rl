@@ -81,8 +81,8 @@ def model_eval(model_path, env, n_episodes=10):
         "MultiInputPolicy",
         env,
         n_steps=1024,
-        verbose=1,
-        tensorboard_log="output/logs/tensorboard"
+        # verbose=1,
+        # tensorboard_log="output/logs/tensorboard"
     ).load(model_path)
 
     metrics = {
@@ -91,35 +91,31 @@ def model_eval(model_path, env, n_episodes=10):
         "unfinished_ratio": []
     }
     for episode in tqdm(range(n_episodes)):
-        obs, info = env.reset()
-        done = False
-        episode_reward = 0
-        infos = []
+        obs, _ = env.reset()
+        action, _ = model.predict(obs, deterministic=True)
+        obs, reward, terminated, truncated, info = env.step(action)
 
-        while not done:
-            action, _ = model.predict(obs, deterministic=True)
-            obs, reward, terminated, truncated, info = env.step(action)
-            done = terminated or truncated
-            episode_reward += reward
-            infos.append(info)
+        metrics["reward"].append(reward)
+        metrics["missed_requests_num"].append(info["missed_requests_num"])
+        metrics["unfinished_ratio"].append(info["unfinished_ratio"])
+        # print(f"{episode}: reward: {metrics['reward']}, missed_requests_num: {metrics['missed_requests_num']},"
+        #       f" unfinished_ratio: {metrics['unfinished_ratio']}")
 
-        metrics["reward"].append(episode_reward / n_episodes)
-        metrics["missed_requests_num"].append( np.mean([elem["missed_requests_num"] for elem in infos]) )
-        metrics["unfinished_ratio"].append( np.mean([elem["unfinished_ratio"] for elem in infos]) )
-        print(f"{episode}: reward: {metrics['reward']}, missed_requests_num: {metrics['missed_requests_num']},"
-              f" unfinished_ratio: {metrics['unfinished_ratio']}")
+    avg_missed = np.mean(metrics["missed_requests_num"])
+    print(f"Среднее кол-во невыполненных заявок: {avg_missed:.2f}")
 
-    # Средняя метрика
-    avg_completed = np.mean(metrics["missed_requests_num"])
-    print(f"Среднее невыполненных заявок: {avg_completed:.2f}")
-
-    fig, axs = plt.subplots(nrows=1, ncols=3)
-
+    fig, axs = plt.subplots(nrows=1, ncols=3, figsize=(15, 5))
     for ax, key in zip(axs, metrics.keys()):
         x = list(range(len(metrics[key])))
         ax.plot(x, metrics[key], linestyle='-', marker='o')
         ax.set_title(str(key))
         ax.grid(True)
+    plt.savefig('output/imgs/eval_lineplot.png')
+    plt.show()
+
+    plt.boxplot(metrics["missed_requests_num"])
+    plt.title(f'Ящик с усами для пропущенных задач на {n_episodes} прогонах')
+    plt.savefig('output/imgs/eval_boxplot.png')
     plt.show()
 
     return metrics
@@ -129,7 +125,8 @@ def main():
     generator = InputDataGenerator(
         load_point_names=GENERATOR_SETTINGS.load_point_names,
         unload_point_names=GENERATOR_SETTINGS.unload_point_names,
-        requests_num=GENERATOR_SETTINGS.max_requests_num,
+        requests_num_min=GENERATOR_SETTINGS.min_requests_num,
+        requests_num_max=GENERATOR_SETTINGS.max_requests_num,
         trucks_num=GENERATOR_SETTINGS.max_truck_num,
         simulator_start_date=datetime.strptime(GENERATOR_SETTINGS.simulator_start_date, '%d.%m.%Y'),
         simulator_end_date=datetime.strptime(GENERATOR_SETTINGS.simulator_end_date, '%d.%m.%Y'),
@@ -144,9 +141,9 @@ def main():
     model = PPO(
         "MultiInputPolicy",
         env,
-        n_steps=1024,
+        n_steps=256,
         clip_range=0.6,
-        verbose=0,
+        verbose=1,
         tensorboard_log="output/logs/tensorboard",
         policy_kwargs={
             "net_arch": [128] * 5
@@ -155,12 +152,12 @@ def main():
 
     eval_callback = EvalCallback(
         env, best_model_save_path="output/models/best",
-        log_path="output/logs/tensorboard", eval_freq=2048,
+        log_path="output/logs/tensorboard", eval_freq=1024,
         deterministic=True, render=False)
     info_logger_callback = InfoLoggerCallback()
 
     model.learn(
-        total_timesteps=ENV_SETTINGS.max_num_of_steps * ENV_SETTINGS.epochs_num,
+        total_timesteps=ENV_SETTINGS.epochs_num * GENERATOR_SETTINGS.max_requests_num,
         progress_bar=True,
         callback=[eval_callback, info_logger_callback]
     )

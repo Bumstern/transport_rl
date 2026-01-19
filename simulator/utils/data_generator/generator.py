@@ -4,6 +4,8 @@ import json
 import os
 import random
 
+from optimizer.settings import GENERATOR_SETTINGS
+
 
 class InputDataGenerator:
 
@@ -11,7 +13,8 @@ class InputDataGenerator:
             self,
             load_point_names: list[str],
             unload_point_names: list[str],
-            requests_num: int,
+            requests_num_min: int,
+            requests_num_max: int,
             trucks_num: int,
             simulator_start_date: datetime.datetime,
             simulator_end_date: datetime.datetime,
@@ -21,7 +24,9 @@ class InputDataGenerator:
     ):
         self._load_point_names= load_point_names
         self._unload_point_names = unload_point_names
-        self._requests_num = requests_num
+        self._requests_num_min = requests_num_min
+        assert(requests_num_min < requests_num_max)
+        self._requests_num_max = requests_num_max
         self._simulator_start_date = simulator_start_date
         self._simulator_end_date = simulator_end_date
         self._trucks_num = trucks_num
@@ -56,8 +61,9 @@ class InputDataGenerator:
             'volume': 0
         }
 
+        requests_num = random.randint(self._requests_num_min, self._requests_num_max)
         requests = []
-        for request_id in range(self._requests_num):
+        for request_id in range(requests_num):
             new_request = copy.deepcopy(request_structure)
             new_request['info']['name'] = f'Request_{request_id}'
             new_request['point_to_load']['name'] = random.choice(self._load_point_names)
