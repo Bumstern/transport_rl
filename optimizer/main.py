@@ -201,8 +201,11 @@ class SimulatorEnv(gymnasium.Env):
 
         return observation, info
 
-    def _calculate_reward(self, current_selection_len: int, missed_requests_len: int):
-        return (-missed_requests_len + (current_selection_len - missed_requests_len)) / current_selection_len
+    def _calculate_reward(self, current_selection: list[int], missed_requests: list[int]) -> float:
+        # return (-missed_requests_len + (current_selection_len - missed_requests_len)) / current_selection_len
+        last_request_id = len(current_selection) - 1
+        reward = -1 if last_request_id in missed_requests else 1
+        return reward
 
     def step(self, action: ActType) -> Tuple[ObsType, float, bool, bool, dict]:
         # Проверяем, не превышен ли лимит заявок
@@ -222,7 +225,7 @@ class SimulatorEnv(gymnasium.Env):
         missed_requests_ids = self._simulator.run(tuple(self._current_selection), self._current_env)
         observation = self._make_normalized_observation(missed_requests_ids, self._current_selection)
 
-        reward = self._calculate_reward(len(self._current_selection), len(missed_requests_ids))
+        reward = self._calculate_reward(self._current_selection, missed_requests_ids)
 
         terminated = len(self._current_selection) >= self._current_env.requests_num
 
