@@ -106,20 +106,26 @@ def model_eval(model_path, env, n_episodes=10):
         metrics["reward"].append(episode_reward / n_episodes)
         metrics["missed_requests_num"].append( np.mean([elem["missed_requests_num"] for elem in infos]) )
         metrics["unfinished_ratio"].append( np.mean([elem["unfinished_ratio"] for elem in infos]) )
-        print(f"{episode}: reward: {metrics['reward']}, missed_requests_num: {metrics['missed_requests_num']},"
-              f" unfinished_ratio: {metrics['unfinished_ratio']}")
+        # print(f"{episode}: reward: {metrics['reward']}, missed_requests_num: {metrics['missed_requests_num']},"
+        #       f" unfinished_ratio: {metrics['unfinished_ratio']}")
 
     # Средняя метрика
     avg_completed = np.mean(metrics["missed_requests_num"])
     print(f"Среднее невыполненных заявок: {avg_completed:.2f}")
 
-    fig, axs = plt.subplots(nrows=1, ncols=3)
+    fig, axs = plt.subplots(nrows=1, ncols=3, figsize=(15, 5))
 
     for ax, key in zip(axs, metrics.keys()):
         x = list(range(len(metrics[key])))
         ax.plot(x, metrics[key], linestyle='-', marker='o')
         ax.set_title(str(key))
         ax.grid(True)
+    plt.savefig('output/imgs/eval_lineplot.png')
+    plt.show()
+
+    plt.boxplot(metrics["missed_requests_num"])
+    plt.title(f'Ящик с усами для пропущенных задач на {n_episodes} прогонах')
+    plt.savefig('output/imgs/eval_boxplot.png')
     plt.show()
 
     return metrics
@@ -139,32 +145,32 @@ def main():
     )
     env = SimulatorEnv(generator)
 
-    # print(model_eval("output/models/best/best_model_600k.zip", env, 25))
+    print(model_eval("output/models/best/best_model_600k.zip", env, 25))
 
-    model = PPO(
-        "MultiInputPolicy",
-        env,
-        n_steps=1024,
-        clip_range=0.6,
-        verbose=0,
-        tensorboard_log="output/logs/tensorboard",
-        policy_kwargs={
-            "net_arch": [128] * 5
-        }
-    )
-
-    eval_callback = EvalCallback(
-        env, best_model_save_path="output/models/best",
-        log_path="output/logs/tensorboard", eval_freq=2048,
-        deterministic=True, render=False)
-    info_logger_callback = InfoLoggerCallback()
-
-    model.learn(
-        total_timesteps=ENV_SETTINGS.max_num_of_steps * ENV_SETTINGS.epochs_num,
-        progress_bar=True,
-        callback=[eval_callback, info_logger_callback]
-    )
-    model.save(f"output/models/{str(datetime.today())}.zip")
+    # model = PPO(
+    #     "MultiInputPolicy",
+    #     env,
+    #     n_steps=1024,
+    #     clip_range=0.6,
+    #     verbose=0,
+    #     tensorboard_log="output/logs/tensorboard",
+    #     policy_kwargs={
+    #         "net_arch": [128] * 5
+    #     }
+    # )
+    #
+    # eval_callback = EvalCallback(
+    #     env, best_model_save_path="output/models/best",
+    #     log_path="output/logs/tensorboard", eval_freq=2048,
+    #     deterministic=True, render=False)
+    # info_logger_callback = InfoLoggerCallback()
+    #
+    # model.learn(
+    #     total_timesteps=ENV_SETTINGS.max_num_of_steps * ENV_SETTINGS.epochs_num,
+    #     progress_bar=True,
+    #     callback=[eval_callback, info_logger_callback]
+    # )
+    # model.save(f"output/models/{str(datetime.today())}.zip")
 
 
 if __name__ == '__main__':
