@@ -11,8 +11,8 @@ from simulator.units.truck import Truck, Position
 
 
 class Simulator:
-    def __init__(self):
-        self._env = None
+    def __init__(self, env: Environment = None):
+        self._env = env
 
     def _request_simulation(
             self,
@@ -154,8 +154,10 @@ class Simulator:
             copied_trucks.append(copied_truck)
         return copied_trucks
 
-    def run(self, selection: tuple[int], env: Environment) -> list[int]:
-        self._env = env
+    def run(self, selection: tuple[int], env: Environment = None) -> list[int]:
+        if env is not None:
+            self._env = env
+        assert self._env is not None, "Не передано env"
 
         # Присваиваем каждой машине список своих заказов с помощью TaskManager
         task_manager = TaskManager(selection, self._env)
