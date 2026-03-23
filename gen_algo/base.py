@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 
 
-type Genome = list[int]
+type Genome = list[int] | tuple[int]
 
 
 class GeneticAlgoBase(ABC):
