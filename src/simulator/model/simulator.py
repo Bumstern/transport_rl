@@ -1,13 +1,10 @@
 import math
-import copy
 
-from pydantic.v1.generics import replace_types
-
-from simulator.environment import Environment
-from simulator.managers.task_manager import TaskManager
-from simulator.units.point import LoadPoint, Point
-from simulator.units.request import Request
-from simulator.units.truck import Truck, Position
+from src.simulator.environment import Environment
+from src.simulator.managers.task_manager import TaskManager
+from src.simulator.model.simulator import Point
+from src.simulator.units.request import Request
+from src.simulator.units.truck import Truck, Position
 
 
 class Simulator:

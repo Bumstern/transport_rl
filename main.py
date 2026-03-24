@@ -4,16 +4,16 @@ from datetime import datetime
 
 import numpy as np
 from stable_baselines3 import PPO
-from stable_baselines3.common.callbacks import BaseCallback, EvalCallback
+from stable_baselines3.common.callbacks import BaseCallback
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 
-from optimizer.main import SimulatorEnv
-from simulator.builder import get_env, get_requests_constrains
-from simulator.environment import Environment
-from simulator.model.simulator import Simulator
-from simulator.utils.data_generator.generator import InputDataGenerator
-from optimizer.settings import ENV_SETTINGS, GENERATOR_SETTINGS
+from src.optimizer.main import SimulatorEnv
+from src.simulator.builder import get_env, get_requests_constrains
+from src.simulator.environment import Environment
+from src.simulator.model.simulator import Simulator
+from src.simulator.utils.data_generator.generator import InputDataGenerator
+from src.optimizer.settings import GENERATOR_SETTINGS
 
 
 class InfoLoggerCallback(BaseCallback):
@@ -80,7 +80,7 @@ def model_eval(model_path, env, n_episodes=10):
     model = PPO(
         "MultiInputPolicy",
         env,
-        n_steps=1024,
+        # n_steps=256,
         # verbose=1,
         # tensorboard_log="output/logs/tensorboard"
     ).load(model_path)
@@ -92,14 +92,22 @@ def model_eval(model_path, env, n_episodes=10):
     }
     for episode in tqdm(range(n_episodes)):
         obs, _ = env.reset()
-        action, _ = model.predict(obs, deterministic=True)
-        obs, reward, terminated, truncated, info = env.step(action)
+        terminated = False
+        cum_reward = 0
+        last_missed_req_num = 0
+        last_unfinished_ratio = 0
+        while terminated == False:
+            action, _ = model.predict(obs, deterministic=True)
+            obs, reward, terminated, truncated, info = env.step(action)
+            cum_reward += reward
+            last_missed_req_num = info["missed_requests_num"]
+            last_unfinished_ratio = info["unfinished_ratio"]
 
-        metrics["reward"].append(reward)
-        metrics["missed_requests_num"].append(info["missed_requests_num"])
-        metrics["unfinished_ratio"].append(info["unfinished_ratio"])
-        # print(f"{episode}: reward: {metrics['reward']}, missed_requests_num: {metrics['missed_requests_num']},"
-        #       f" unfinished_ratio: {metrics['unfinished_ratio']}")
+        metrics["reward"].append(cum_reward)
+        metrics["missed_requests_num"].append(last_missed_req_num)
+        metrics["unfinished_ratio"].append(last_unfinished_ratio)
+        print(f"{episode}: reward: {metrics['reward']}, missed_requests_num: {metrics['missed_requests_num']},"
+              f" unfinished_ratio: {metrics['unfinished_ratio']}")
 
     avg_missed = np.mean(metrics["missed_requests_num"])
     print(f"Среднее кол-во невыполненных заявок: {avg_missed:.2f}")
@@ -136,32 +144,32 @@ def main():
     )
     env = SimulatorEnv(generator)
 
-    # print(model_eval("output/models/best/best_model_600k.zip", env, 25))
+    print(model_eval("output/models/best/best_model.zip", env, 25))
 
-    model = PPO(
-        "MultiInputPolicy",
-        env,
-        n_steps=256,
-        clip_range=0.6,
-        verbose=1,
-        tensorboard_log="output/logs/tensorboard",
-        policy_kwargs={
-            "net_arch": [128] * 5
-        }
-    )
-
-    eval_callback = EvalCallback(
-        env, best_model_save_path="output/models/best",
-        log_path="output/logs/tensorboard", eval_freq=1024,
-        deterministic=True, render=False)
-    info_logger_callback = InfoLoggerCallback()
-
-    model.learn(
-        total_timesteps=ENV_SETTINGS.epochs_num * GENERATOR_SETTINGS.max_requests_num,
-        progress_bar=True,
-        callback=[eval_callback, info_logger_callback]
-    )
-    model.save(f"output/models/{str(datetime.today())}.zip")
+    # model = PPO(
+    #     "MultiInputPolicy",
+    #     env,
+    #     n_steps=256,
+    #     clip_range=0.6,
+    #     verbose=1,
+    #     tensorboard_log="output/logs/tensorboard",
+    #     policy_kwargs={
+    #         "net_arch": [128] * 5
+    #     }
+    # )
+    #
+    # eval_callback = EvalCallback(
+    #     env, best_model_save_path="output/models/best",
+    #     log_path="output/logs/tensorboard", eval_freq=2048,
+    #     deterministic=True, render=False)
+    # info_logger_callback = InfoLoggerCallback()
+    #
+    # model.learn(
+    #     total_timesteps=ENV_SETTINGS.epochs_num * GENERATOR_SETTINGS.max_requests_num,
+    #     progress_bar=True,
+    #     callback=[eval_callback, info_logger_callback]
+    # )
+    # model.save(f"output/models/{str(datetime.today())}.zip")
 
 
 if __name__ == '__main__':

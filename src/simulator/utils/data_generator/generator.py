@@ -4,8 +4,6 @@ import json
 import os
 import random
 
-from optimizer.settings import GENERATOR_SETTINGS
-
 
 class InputDataGenerator:
 

@@ -2,7 +2,7 @@ from typing import Optional
 
 from pydantic import BaseModel, ConfigDict
 
-from simulator.units.point import LoadPoint, UnloadPoint
+from src.simulator.units.point import LoadPoint, UnloadPoint
 
 
 class RequestInfo(BaseModel):

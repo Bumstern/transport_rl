@@ -5,14 +5,12 @@ import numpy as np
 from gymnasium import spaces
 from gymnasium.core import ObsType, ActType
 from numpy import floating, integer
-from sympy.strategies.core import switch
 
-from simulator.builder import get_env, get_requests_constrains
-from simulator.environment import Environment
-from simulator.model.simulator import Simulator
-from optimizer.settings import ENV_SETTINGS, GENERATOR_SETTINGS
-from simulator.units.request import Request
-from simulator.utils.data_generator.generator import InputDataGenerator
+from src.simulator.builder import get_env, get_requests_constrains
+from src.simulator.environment import Environment
+from src.simulator.model.simulator import Simulator
+from src.optimizer.settings import GENERATOR_SETTINGS
+from src.simulator.utils.data_generator.generator import InputDataGenerator
 
 
 class SimulatorEnv(gymnasium.Env):

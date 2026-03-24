@@ -1,8 +1,6 @@
-import copy
-
 from pydantic import BaseModel, ConfigDict
 
-from simulator.units.point import Point
+from src.simulator.units.point import Point
 
 
 class Position(BaseModel):

@@ -1,6 +1,6 @@
-from pydantic import BaseModel, field_validator, ConfigDict
+from pydantic import BaseModel, ConfigDict
 
-from simulator.units.point import RoutePoint
+from src.simulator.units.point import RoutePoint
 
 
 class Geometry(BaseModel):

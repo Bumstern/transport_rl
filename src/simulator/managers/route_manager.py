@@ -1,9 +1,9 @@
 from math import ceil
 
-from simulator.units.point import Point
-from simulator.units.request import Request
-from simulator.units.route import Route
-from simulator.units.truck import Truck
+from src.simulator.units.point import Point
+from src.simulator.units.request import Request
+from src.simulator.units.route import Route
+from src.simulator.units.truck import Truck
 
 
 class RouteManager:

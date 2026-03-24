@@ -1,8 +1,7 @@
 import random
 
-from gen_algo.base import GeneticAlgoBase, Genome
-from optimizer.settings import GENERATOR_SETTINGS
-from simulator.model.simulator import Simulator
+from src.gen_algo.base import GeneticAlgoBase, Genome
+from src.simulator.model.simulator import Simulator
 
 
 class GeneticAlgoSimple(GeneticAlgoBase):

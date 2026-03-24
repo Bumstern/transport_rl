@@ -1,8 +1,6 @@
-from collections import deque
-
-from simulator.environment import Environment
-from simulator.units.request import Request
-from simulator.units.truck import Truck
+from src.simulator.environment import Environment
+from src.simulator.units.request import Request
+from src.simulator.units.truck import Truck
 
 
 class TaskManager:

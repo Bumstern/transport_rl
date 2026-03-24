@@ -1,10 +1,10 @@
 from pydantic import BaseModel, ConfigDict, field_validator, ValidationError
 
-from simulator.managers.route_manager import RouteManager
-from simulator.units.entities import Entities
-from simulator.units.request import Request
-from simulator.units.route import Route
-from simulator.units.truck import Truck
+from src.simulator.managers.route_manager import RouteManager
+from src.simulator.units.entities import Entities
+from src.simulator.units.request import Request
+from src.simulator.units.route import Route
+from src.simulator.units.truck import Truck
 
 
 class Environment(BaseModel):
