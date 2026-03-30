@@ -2,7 +2,7 @@ import math
 
 from src.simulator.environment import Environment
 from src.simulator.managers.task_manager import TaskManager
-from src.simulator.model.simulator import Point
+from src.simulator.units.point import Point
 from src.simulator.units.request import Request
 from src.simulator.units.truck import Truck, Position
 

@@ -1,7 +1,7 @@
 from collections import deque
-from functools import singledispatchmethod
-from typing import Type, overload
+from typing import Type
 
+import numpy as np
 from pydantic import ValidationError
 
 
@@ -22,11 +22,11 @@ class Entities:
             raise
 
     def __getitem__(self, index):
-        if isinstance(index, int):
+        if isinstance(index, int) | isinstance(index, np.integer):
             return self.__list_by_id[index]
         elif isinstance(index, str):
             return self.__named_dict[index]
-        elif isinstance(index, float):
+        elif isinstance(index, float) | isinstance(index, np.floating):
             if index == int(index):
                 return self.__list_by_id[int(index)]
             else:

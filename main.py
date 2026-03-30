@@ -3,8 +3,9 @@ import random
 from datetime import datetime
 
 import numpy as np
+from sb3_contrib import MaskablePPO
 from stable_baselines3 import PPO
-from stable_baselines3.common.callbacks import BaseCallback
+from stable_baselines3.common.callbacks import BaseCallback, EvalCallback
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 
@@ -144,32 +145,32 @@ def main():
     )
     env = SimulatorEnv(generator)
 
-    print(model_eval("output/models/best/best_model.zip", env, 25))
+    # print(model_eval("output/models/best/best_model.zip", env, 25))
 
-    # model = PPO(
-    #     "MultiInputPolicy",
-    #     env,
-    #     n_steps=256,
-    #     clip_range=0.6,
-    #     verbose=1,
-    #     tensorboard_log="output/logs/tensorboard",
-    #     policy_kwargs={
-    #         "net_arch": [128] * 5
-    #     }
-    # )
-    #
-    # eval_callback = EvalCallback(
-    #     env, best_model_save_path="output/models/best",
-    #     log_path="output/logs/tensorboard", eval_freq=2048,
-    #     deterministic=True, render=False)
-    # info_logger_callback = InfoLoggerCallback()
-    #
-    # model.learn(
-    #     total_timesteps=ENV_SETTINGS.epochs_num * GENERATOR_SETTINGS.max_requests_num,
-    #     progress_bar=True,
-    #     callback=[eval_callback, info_logger_callback]
-    # )
-    # model.save(f"output/models/{str(datetime.today())}.zip")
+    model = MaskablePPO(
+        "MultiInputPolicy",
+        env,
+        n_steps=256,
+        clip_range=0.6,
+        verbose=1,
+        tensorboard_log="output/logs/tensorboard",
+        policy_kwargs={
+            "net_arch": [128] * 5
+        }
+    )
+
+    eval_callback = EvalCallback(
+        env, best_model_save_path="output/models/best",
+        log_path="output/logs/tensorboard", eval_freq=2048,
+        deterministic=True, render=False)
+    info_logger_callback = InfoLoggerCallback()
+
+    model.learn(
+        total_timesteps=1024 * GENERATOR_SETTINGS.max_requests_num,
+        progress_bar=True,
+        callback=[eval_callback, info_logger_callback]
+    )
+    model.save(f"output/models/{str(datetime.today())}.zip")
 
 
 if __name__ == '__main__':
