@@ -1,0 +1,138 @@
+import numpy as np
+
+from src.optimizer.settings import GENERATOR_SETTINGS
+from src.simulator.environment import Environment
+
+
+class ObservationBuilder:
+
+    def __init__(self, env: Environment, requests_constrains: list[list[int]]):
+        """ Создатель наблюдений и разрешенной маски
+        :param env: Объект Environment с заявками, машинами и прочим
+        :param requests_constrains: Нужно передавать список разрешенных машин с добавленным [-1]
+        """
+        self._env = env
+        self._req_constrains = requests_constrains
+        self._static_obs = self._make_normalized_static_observation()
+
+    @staticmethod
+    def __get_binary_list_with_position_mask(list_len: int, mask: list[int], mask_is_zeros: bool):
+        if mask_is_zeros:
+            binary_list = [1] * list_len
+        else:
+            binary_list = [0] * list_len
+
+        for position in mask:
+            binary_list[position] = 0 if mask_is_zeros else 1
+        return binary_list
+
+    @staticmethod
+    def __make_obs_from_current_selection(selection: list[int]) -> list[int]:
+        # Дополним текущую выборку до максимального кол-ва заявок с помощью -1
+        # Это нужно чтобы можно было его передать как наблюдение в модель
+        remaining_requests_num = GENERATOR_SETTINGS.max_requests_num - len(selection)
+        observation = selection + [-1] * remaining_requests_num
+        return observation
+
+    @staticmethod
+    def __make_active_list_requests(current_selection: list[int]) -> list[int]:
+        # Дополним бинарную маску до максимального кол-ва заявок с помощью -1
+        # Это нужно чтобы можно было его передать как наблюдение в модель
+        remaining_requests_num = GENERATOR_SETTINGS.max_requests_num - len(current_selection)
+        active_list = [1] * len(current_selection) + [0] * remaining_requests_num
+        return active_list
+
+    @staticmethod
+    def _convert_obs_to_numpy(observation: dict) -> dict:
+
+        return {
+            "time_windows": np.array(observation["time_windows"], dtype=np.float64),
+            "executed_requests": np.array(observation["executed_requests"], dtype=np.int8),
+            "unfinished_ratio": np.array(observation["unfinished_ratio"], dtype=np.float64),
+            "current_selection": np.array(observation["current_selection"], dtype=np.int64),
+            "next_request_tw": np.array(observation["next_request_tw"], dtype=np.float64),
+        }
+
+    def _normalize_observation(self, observation: dict) -> None:
+        for key in observation.keys():
+            match key:
+                case "executed_requests":
+                    # Ничего не нужно нормализовать
+                    pass
+                case "unfinished_ratio":
+                    # Ничего не нужно нормализовать
+                    pass
+                case "current_selection":
+                    pass
+                case "is_active":
+                    pass
+                case "next_request_tw":
+                    observation[key] = [observation[key][0] / self._env.end_date, observation[key][1] / self._env.end_date]
+                case _:
+                    raise NotImplementedError
+
+    def _make_normalized_static_observation(self) -> dict:
+        max_and_current_requests_len_delta = GENERATOR_SETTINGS.max_requests_num - self._env.requests_num
+
+        time_windows = []
+        for request in self._env.requests:
+            # Нормализуем временные окна в интервале [0, 1]
+            request_window = [request.point_to_load.date_start_window / self._env.end_date, request.point_to_load.date_end_window / self._env.end_date]
+            time_windows.append(request_window)
+        time_windows += [[0, 0]] * max_and_current_requests_len_delta
+
+        static_observation = {
+            "time_windows": time_windows
+        }
+
+        return static_observation
+
+    def create_action_mask(self, current_request_id: int) -> np.ndarray[bool]:
+        # Тк действие модели на каждом шаге - это выбор id машины на текущую заявку
+        # (по сути число из [-1, max_truck_num]), то
+        # мне нужно знать ограничения текущей заявки, чтобы вернуть бинарный вектор shape=(1, max_truck_num+1)
+        current_req_constrains = np.array(self._req_constrains[current_request_id]) + 1
+        current_req_constrains = list(current_req_constrains)
+        binary_action_mask = self.__get_binary_list_with_position_mask(
+            list_len=GENERATOR_SETTINGS.max_truck_num + 1,
+            mask=current_req_constrains,
+            mask_is_zeros=False
+        )
+        return np.array(binary_action_mask, dtype=bool)
+
+    def create_observation(self, missed_requests_ids: list[int], current_selection: list[int]) -> dict:
+        # Получаем бинарную маску с выполненными и невыполненными заявками
+        not_started_requests_ids = [i for i in range(len(current_selection), GENERATOR_SETTINGS.max_requests_num)]
+        executed_requests = self.__get_binary_list_with_position_mask(
+            list_len=GENERATOR_SETTINGS.max_requests_num,
+            mask=missed_requests_ids + not_started_requests_ids,
+            mask_is_zeros=True
+        )
+        # Считаем отношение невыполненных заявок к выполненным
+        if len(current_selection) > 0:
+            unfinished_ratio = [ len(missed_requests_ids) / len(current_selection) ]
+        else:
+            unfinished_ratio = [0]
+        # Дополняем выборку незначащими -1 до кол-ва требуемого в наблюдении
+        selection_obs = self.__make_obs_from_current_selection(current_selection)
+        # Вычисляем временное окно следующей заявки
+        if len(current_selection) < self._env.requests_num:
+            next_request = self._env.requests[len(current_selection)]
+            next_request_tw = [next_request.point_to_load.date_start_window, next_request.point_to_load.date_end_window]
+        else:
+            next_request_tw = [0, 0]
+        observation = {
+            "executed_requests": executed_requests,
+            "unfinished_ratio": unfinished_ratio,
+            "current_selection": selection_obs,
+            "next_request_tw": next_request_tw
+        }
+        self._normalize_observation(observation)
+        observation.update(self._static_obs)
+
+        return self._convert_obs_to_numpy(observation)
+
+
+
+
+
