@@ -46,11 +46,11 @@ class ObservationBuilder:
     def _convert_obs_to_numpy(observation: dict) -> dict:
 
         return {
-            "time_windows": np.array(observation["time_windows"], dtype=np.float64),
+            "time_windows": np.array(observation["time_windows"], dtype=np.float32),
             "executed_requests": np.array(observation["executed_requests"], dtype=np.int8),
-            "unfinished_ratio": np.array(observation["unfinished_ratio"], dtype=np.float64),
+            "unfinished_ratio": np.array(observation["unfinished_ratio"], dtype=np.float32),
             "current_selection": np.array(observation["current_selection"], dtype=np.int64),
-            "next_request_tw": np.array(observation["next_request_tw"], dtype=np.float64),
+            "next_request_tw": np.array(observation["next_request_tw"], dtype=np.float32),
         }
 
     def _normalize_observation(self, observation: dict) -> None:

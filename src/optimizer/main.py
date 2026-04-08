@@ -6,7 +6,7 @@ from gymnasium import spaces
 from gymnasium.core import ObsType, ActType
 
 from src.optimizer.utils.observation_builder import ObservationBuilder
-from src.simulator.builder import get_env, get_requests_constrains
+from src.simulator.builder import get_env, get_requests_constraints
 from src.simulator.environment import Environment
 from src.simulator.model.simulator import Simulator
 from src.optimizer.settings import GENERATOR_SETTINGS
@@ -23,9 +23,9 @@ class SimulatorEnv(gymnasium.Env):
             # Бинарная маска с выполненными и невыполненными заявками
             "executed_requests": spaces.MultiBinary(GENERATOR_SETTINGS.max_requests_num),
             # Отношение выполненных заявок к невыполненным
-            "unfinished_ratio": spaces.Box(0.0, 1.0, shape=(1,), dtype=np.float16),
+            "unfinished_ratio": spaces.Box(0.0, 1.0, shape=(1,), dtype=np.float32),
             # Текущее распределение
-            "current_selection": spaces.Box(low=-1, high=GENERATOR_SETTINGS.max_truck_num - 1, shape=(GENERATOR_SETTINGS.max_requests_num,), dtype=np.int32),
+            "current_selection": spaces.Box(low=-1, high=GENERATOR_SETTINGS.max_truck_num - 1, shape=(GENERATOR_SETTINGS.max_requests_num,), dtype=np.int64),
             # Временные окна следующей задачи
             "next_request_tw": spaces.Box(0.0, 1.0, shape=(2,), dtype=np.float32),
         })
@@ -51,7 +51,7 @@ class SimulatorEnv(gymnasium.Env):
 
         input_data, routes_data = self._generator.generate_all(None)
         self._current_env: Environment = get_env(input_data, routes_data)
-        self._current_requests_constrains = get_requests_constrains(self._current_env, with_missed=True)
+        self._current_requests_constrains = get_requests_constraints(self._current_env, with_missed=True)
         self._obs_builder = ObservationBuilder(self._current_env, self._current_requests_constrains)
 
         self._current_selection = []

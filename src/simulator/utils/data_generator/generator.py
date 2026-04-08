@@ -40,6 +40,7 @@ class InputDataGenerator:
     ) -> (datetime.datetime, datetime.datetime):
         window_start = self._simulator_start_date + datetime.timedelta(hours=time_gap_from_start_in_hours)
         window_end = window_start + datetime.timedelta(hours=duration_in_hours)
+        window_end = min(window_end, self._simulator_end_date)
         return window_start, window_end
 
     def generate_requests(self) -> list[dict]:

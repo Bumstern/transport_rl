@@ -27,6 +27,6 @@ def get_env(input_data: dict, routes_data: dict) -> Environment:
     return env
 
 
-def get_requests_constrains(env: Environment, with_missed: bool) -> list[list[int]]:
+def get_requests_constraints(env: Environment, with_missed: bool) -> list[list[int]]:
     requests_constrains = apply_requirements(env.requests, env.trucks, with_missed=with_missed)
     return requests_constrains
