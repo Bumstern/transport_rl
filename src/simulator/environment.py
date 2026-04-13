@@ -32,7 +32,11 @@ class Environment(BaseModel):
     @classmethod
     def __init_requests(cls, data: list[dict]) -> Entities:
         try:
-            return Entities(data, Request)
+            sorted_data = sorted(
+                data,
+                key=lambda request_data: request_data["point_to_load"]["date_start_window"],
+            )
+            return Entities(sorted_data, Request)
         except ValidationError as e:
             print(e.json())
             raise

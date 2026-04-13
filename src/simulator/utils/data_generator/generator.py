@@ -105,8 +105,8 @@ class InputDataGenerator:
             new_truck['info']['name'] =  f'Truck_{truck_id}'
             new_truck['position']['current_point']['name'] = random.choice(self._unload_point_names)
             new_truck['cargo_params']['capacity'] = random.choice(self._capacities_variants)
-            new_truck['cargo_params']['loading_speed'] = 10
-            new_truck['cargo_params']['unloading_speed'] = 10
+            new_truck['cargo_params']['loading_speed'] = 4000
+            new_truck['cargo_params']['unloading_speed'] = 2000
             new_truck['moving_params']['speed_with_cargo'] = 10
             new_truck['moving_params']['speed_without_cargo'] = 12
             trucks.append(new_truck)

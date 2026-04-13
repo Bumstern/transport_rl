@@ -108,7 +108,7 @@ class SimulatorEnv(gymnasium.Env):
         self._current_selection.append(self.__action_to_truck_id(action))
 
         # Применяем ограничения (по идее с маской действий эта логика не нужна)
-        self._apply_restrictions_to_selection(self._current_selection)
+        # self._apply_restrictions_to_selection(self._current_selection)
 
         # Запускаем симуляцию выборки
         missed_requests_ids = self._simulator.run(tuple(self._current_selection), self._current_env)
