@@ -42,7 +42,7 @@ class GeneticAlgoSimple(GeneticAlgoBase):
 
     def _fitness_function(self, individual: Genome) -> int:
         """Целевая функция: считаем количество выполненных заявок."""
-        missed_requests_ids = self._simulator.run(tuple(individual))
+        missed_requests_ids, _, _ = self._simulator.run(tuple(individual))
         return self._genome_length - len(missed_requests_ids)
 
     def _evaluate_population(self, population: list[Genome]) -> list[int]:

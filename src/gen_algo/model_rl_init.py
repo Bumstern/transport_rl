@@ -56,7 +56,7 @@ class GeneticAlgoWithRLInit(GeneticAlgoSimple):
             if with_simulation:
                 # Если нужно для каждой хромосомы высчитывать пропущенные заявки
                 # Возможно будут более хорошие предсказания, хоть и в ущерб скорости инициализации
-                missed_requests_ids = self._simulator.run(current_selection)
+                missed_requests_ids, _, _ = self._simulator.run(tuple(current_selection))
         return current_selection
 
     def _create_initial_population(self) -> list[Genome]:

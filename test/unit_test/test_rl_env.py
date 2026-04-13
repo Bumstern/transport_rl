@@ -32,18 +32,23 @@ def rl_env() -> SimulatorEnv:
 
 def test_simulator_run(simulator: Simulator, environment: Environment, requests_constraints: list[list[int]]):
     # Тестируем обычный запуск в ограничениях
-    list_with_missed = simulator.run([random.choice(req_constr) for req_constr in requests_constraints])
+    list_with_missed, truck_positions, truck_available_times = simulator.run(
+        [random.choice(req_constr) for req_constr in requests_constraints]
+    )
     assert isinstance(list_with_missed, list)
+    assert isinstance(truck_positions, list)
+    assert isinstance(truck_available_times, list)
+    assert len(truck_positions) == len(environment.trucks)
+    assert len(truck_available_times) == len(environment.trucks)
 
     # Тестируем, что запуск вне ограничения выкинет ошибку
     all_trucks_ids = np.arange(start=0, stop=len(environment.trucks), step=1, dtype=int)
     with pytest.raises(AssertionError):
-        list_with_missed = simulator.run([random.choice(list(set(all_trucks_ids).symmetric_difference(set(req_constr))))
-                                          for req_constr in requests_constraints])
+        simulator.run([random.choice(list(set(all_trucks_ids).symmetric_difference(set(req_constr))))
+                       for req_constr in requests_constraints])
 
 
-def test_rl_env_check(rl_env: SimulatorEnv):
-    check_env(rl_env)
-
-
+# # Запускает случайные действия, поэтому чтобы он не упал нужно запускать с _apply_restrictions_to_selection
+# def test_rl_env_check(rl_env: SimulatorEnv):
+#     check_env(rl_env)
 

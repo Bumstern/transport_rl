@@ -151,7 +151,7 @@ class Simulator:
             copied_trucks.append(copied_truck)
         return copied_trucks
 
-    def run(self, selection: tuple[int], env: Environment = None) -> list[int]:
+    def run(self, selection: tuple[int], env: Environment = None) -> tuple[list[int], list[Point], list[int]]:
         if env is not None:
             self._env = env
         assert self._env is not None, "Не передано env"
@@ -169,6 +169,7 @@ class Simulator:
                 missed_requests_ids.append(request_id)
 
         # В цикле по каждой машине
+        truck_available_times = [0] * len(trucks)
         for truck in trucks:
             truck: Truck
             current_time = 0
@@ -197,4 +198,8 @@ class Simulator:
                         missed_requests_ids=missed_requests_ids
                     )
 
-        return missed_requests_ids
+            truck_available_times[truck.id] = current_time
+
+        truck_positions = [truck.position.current_point.model_copy(deep=True) for truck in trucks]
+
+        return missed_requests_ids, truck_positions, truck_available_times

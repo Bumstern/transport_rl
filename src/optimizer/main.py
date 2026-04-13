@@ -28,6 +28,10 @@ class SimulatorEnv(gymnasium.Env):
             "current_selection": spaces.Box(low=-1, high=GENERATOR_SETTINGS.max_truck_num - 1, shape=(GENERATOR_SETTINGS.max_requests_num,), dtype=np.int64),
             # Временные окна следующей задачи
             "next_request_tw": spaces.Box(0.0, 1.0, shape=(2,), dtype=np.float32),
+            # Время в пути до погрузки следующей заявки для каждой машины
+            "travel_time_to_load": spaces.Box(0.0, 1.0, shape=(GENERATOR_SETTINGS.max_truck_num,), dtype=np.float32),
+            # Запас по времени до начала окна погрузки следующей заявки
+            "time_slack_to_window_start": spaces.Box(-1.0, 1.0, shape=(GENERATOR_SETTINGS.max_truck_num,), dtype=np.float32),
         })
 
         self._static_obs = None     # Это неизменные наблюдения (как временные окна заявок и ограничения)
@@ -111,8 +115,16 @@ class SimulatorEnv(gymnasium.Env):
         # self._apply_restrictions_to_selection(self._current_selection)
 
         # Запускаем симуляцию выборки
-        missed_requests_ids = self._simulator.run(tuple(self._current_selection), self._current_env)
-        observation = self._obs_builder.create_observation(missed_requests_ids, self._current_selection)
+        missed_requests_ids, truck_positions, truck_available_times = self._simulator.run(
+            tuple(self._current_selection),
+            self._current_env
+        )
+        observation = self._obs_builder.create_observation(
+            missed_requests_ids,
+            self._current_selection,
+            truck_positions,
+            truck_available_times
+        )
 
         # Считаем награду
         reward = self._calculate_reward(self._current_selection, missed_requests_ids)

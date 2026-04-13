@@ -37,8 +37,8 @@ def requests_constraints(environment: Environment) -> list[list[int]]:
 
 
 @pytest.fixture(scope='module')
-def obs_builder(environment: Environment, request_constraints: list[list[int]]) -> ObservationBuilder:
-    obb = ObservationBuilder(environment, request_constraints)
+def obs_builder(environment: Environment, requests_constraints: list[list[int]]) -> ObservationBuilder:
+    obb = ObservationBuilder(environment, requests_constraints)
     return obb
 
 

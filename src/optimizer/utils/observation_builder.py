@@ -2,6 +2,7 @@ import numpy as np
 
 from src.optimizer.settings import GENERATOR_SETTINGS
 from src.simulator.environment import Environment
+from src.simulator.units.point import Point
 
 
 class ObservationBuilder:
@@ -51,6 +52,8 @@ class ObservationBuilder:
             "unfinished_ratio": np.array(observation["unfinished_ratio"], dtype=np.float32),
             "current_selection": np.array(observation["current_selection"], dtype=np.int64),
             "next_request_tw": np.array(observation["next_request_tw"], dtype=np.float32),
+            "travel_time_to_load": np.array(observation["travel_time_to_load"], dtype=np.float32),
+            "time_slack_to_window_start": np.array(observation["time_slack_to_window_start"], dtype=np.float32),
         }
 
     def _normalize_observation(self, observation: dict) -> None:
@@ -68,6 +71,13 @@ class ObservationBuilder:
                     pass
                 case "next_request_tw":
                     observation[key] = [observation[key][0] / self._env.end_date, observation[key][1] / self._env.end_date]
+                case "travel_time_to_load":
+                    observation[key] = [min(travel_time / self._env.end_date, 1.0) for travel_time in observation[key]]
+                case "time_slack_to_window_start":
+                    observation[key] = [
+                        min(max(slack / self._env.end_date, -1.0), 1.0)
+                        for slack in observation[key]
+                    ]
                 case _:
                     raise NotImplementedError
 
@@ -100,7 +110,60 @@ class ObservationBuilder:
         )
         return np.array(binary_action_mask, dtype=bool)
 
-    def create_observation(self, missed_requests_ids: list[int], current_selection: list[int]) -> dict:
+    def _get_current_truck_positions(self, truck_positions: list[Point] | None) -> list[Point]:
+        if truck_positions is not None:
+            return truck_positions
+        return [truck.position.current_point.model_copy(deep=True) for truck in self._env.trucks]
+
+    def _get_travel_time_to_load(self, current_selection: list[int], truck_positions: list[Point] | None) -> list[int]:
+        travel_time_to_load = [0] * GENERATOR_SETTINGS.max_truck_num
+        if len(current_selection) >= self._env.requests_num:
+            return travel_time_to_load
+
+        current_truck_positions = self._get_current_truck_positions(truck_positions)
+        next_request = self._env.requests[len(current_selection)]
+        for truck_id in range(len(self._env.trucks)):
+            if truck_id not in self._req_constrains[len(current_selection)]:
+                travel_time_to_load[truck_id] = self._env.end_date
+                continue
+            travel_time_to_load[truck_id] = self._env.route_manager.calculate_travel_time_to_point(
+                truck=self._env.trucks[truck_id],
+                with_cargo=False,
+                request=next_request,
+                departure_point=current_truck_positions[truck_id],
+                destination_point=next_request.point_to_load
+            )
+        return travel_time_to_load
+
+    def _get_time_slack_to_window_start(
+            self,
+            current_selection: list[int],
+            travel_time_to_load: list[int],
+            truck_available_times: list[int] | None
+    ) -> list[int]:
+        time_slack_to_window_start = [0] * GENERATOR_SETTINGS.max_truck_num
+        if len(current_selection) >= self._env.requests_num:
+            return time_slack_to_window_start
+
+        next_request = self._env.requests[len(current_selection)]
+        current_truck_available_times = truck_available_times or [0] * len(self._env.trucks)
+        for truck_id in range(len(self._env.trucks)):
+            if truck_id not in self._req_constrains[len(current_selection)]:
+                time_slack_to_window_start[truck_id] = -self._env.end_date
+                continue
+            time_slack_to_window_start[truck_id] = (
+                next_request.point_to_load.date_start_window -
+                (current_truck_available_times[truck_id] + travel_time_to_load[truck_id])
+            )
+        return time_slack_to_window_start
+
+    def create_observation(
+            self,
+            missed_requests_ids: list[int],
+            current_selection: list[int],
+            truck_positions: list[Point] | None = None,
+            truck_available_times: list[int] | None = None
+    ) -> dict:
         # Получаем бинарную маску с выполненными и невыполненными заявками
         not_started_requests_ids = [i for i in range(len(current_selection), GENERATOR_SETTINGS.max_requests_num)]
         executed_requests = self.__get_binary_list_with_position_mask(
@@ -121,18 +184,23 @@ class ObservationBuilder:
             next_request_tw = [next_request.point_to_load.date_start_window, next_request.point_to_load.date_end_window]
         else:
             next_request_tw = [0, 0]
+        travel_time_to_load = self._get_travel_time_to_load(current_selection, truck_positions)
+        time_slack_to_window_start = self._get_time_slack_to_window_start(
+            current_selection,
+            travel_time_to_load,
+            truck_available_times
+        )
         observation = {
             "executed_requests": executed_requests,
             "unfinished_ratio": unfinished_ratio,
             "current_selection": selection_obs,
-            "next_request_tw": next_request_tw
+            "next_request_tw": next_request_tw,
+            "travel_time_to_load": travel_time_to_load,
+            "time_slack_to_window_start": time_slack_to_window_start,
         }
         self._normalize_observation(observation)
         observation.update(self._static_obs)
 
         return self._convert_obs_to_numpy(observation)
-
-
-
 
 
