@@ -125,7 +125,7 @@ def parse_args() -> TrainConfig:
     parser.add_argument(
         "--clip-range",
         type=float,
-        default=0.6,
+        default=0.25,
         help="PPO clip range.",
     )
     parser.add_argument(

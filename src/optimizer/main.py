@@ -44,6 +44,7 @@ class SimulatorEnv(gymnasium.Env):
 
         self._current_selection = []
         self._current_step = 1
+        self._current_observation = None
 
     def reset(
         self,
@@ -62,6 +63,7 @@ class SimulatorEnv(gymnasium.Env):
         self._current_step = 1
 
         observation = self._obs_builder.create_observation([], [])
+        self._current_observation = observation
         info = {
             "missed_requests_num": 0,
             "unfinished_ratio": observation["unfinished_ratio"],
@@ -88,10 +90,36 @@ class SimulatorEnv(gymnasium.Env):
                 selection[request_id] = -1
                 print(f"Не выполнилось ограничение для заявки {request_id}! Пытались поставить {truck_id}.")
 
-    def _calculate_reward(self, current_selection: list[int], missed_requests: list[int]) -> float:
-        # return (-missed_requests_len + (current_selection_len - missed_requests_len)) / current_selection_len
+    @staticmethod
+    def _slack_penalty(slack: float) -> float:
+        if -1.0 <= slack < 0.0:
+            return -(abs(slack) ** 2)
+        if 0.0 <= slack <= 1.0:
+            return 1.0 - ((4.0 * slack) ** 0.5)
+        raise ValueError(f"Slack must be in [-1, 1], got {slack}")
+
+    def _get_slack_penalty_for_action(self, action: ActType, observation_before_action: ObsType) -> float:
+        truck_id = self.__action_to_truck_id(action)
+        if truck_id == -1:
+            return 0.0
+
+        chosen_slack = float(observation_before_action["time_slack_to_window_start"][truck_id])
+        return self._slack_penalty(chosen_slack)
+
+    def _calculate_reward(
+            self,
+            action: ActType,
+            observation_before_action: ObsType,
+            current_selection: list[int],
+            missed_requests: list[int]
+    ) -> float:
         last_request_id = len(current_selection) - 1
-        reward = -1 if last_request_id in missed_requests else 1
+        chosen_truck_id = self.__action_to_truck_id(action)
+        if chosen_truck_id == -1:
+            reward = -2.0
+        else:
+            reward = -1.0 if last_request_id in missed_requests else 1.0
+            reward += self._get_slack_penalty_for_action(action, observation_before_action)
         return reward
 
     def __action_to_truck_id(self, action: ActType):
@@ -101,12 +129,14 @@ class SimulatorEnv(gymnasium.Env):
     def step(self, action: ActType) -> Tuple[ObsType, float, bool, bool, dict]:
         # Проверяем, не превышен ли лимит заявок
         if len(self._current_selection) >= self._current_env.requests_num:
-            observation = self._obs_builder.create_observation([], self._current_selection)
+            observation = self._current_observation
             return observation, 0.0, True, False, {
                 "missed_requests_num": 0,
                 "unfinished_ratio": observation["unfinished_ratio"],
                 "current_selection": self._current_selection
             }
+
+        observation_before_action = self._current_observation
 
         # Ставим машину на текущую заявку
         self._current_selection.append(self.__action_to_truck_id(action))
@@ -125,9 +155,15 @@ class SimulatorEnv(gymnasium.Env):
             truck_positions,
             truck_available_times
         )
+        self._current_observation = observation
 
         # Считаем награду
-        reward = self._calculate_reward(self._current_selection, missed_requests_ids)
+        reward = self._calculate_reward(
+            action,
+            observation_before_action,
+            self._current_selection,
+            missed_requests_ids
+        )
 
         # Проверяем нужно ли заканчивать предсказание
         terminated = len(self._current_selection) >= self._current_env.requests_num

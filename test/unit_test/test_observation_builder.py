@@ -16,8 +16,15 @@ def test_create_observation_contains_pairwise_features(obs_builder, environment,
 
 
 def test_forbidden_trucks_have_extreme_pairwise_values(obs_builder, environment, requests_constraints):
-    current_selection = []
-    current_request_id = len(current_selection)
+    current_request_id = next(
+        request_id
+        for request_id, allowed_trucks in enumerate(requests_constraints)
+        if any(
+            truck_id not in allowed_trucks
+            for truck_id in range(len(environment.trucks))
+        )
+    )
+    current_selection = [-1] * current_request_id
 
     forbidden_truck_ids = [
         truck_id for truck_id in range(len(environment.trucks))

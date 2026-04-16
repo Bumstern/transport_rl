@@ -58,6 +58,19 @@ def _assert_observation_is_valid(rl_env: SimulatorEnv, observation: dict) -> Non
     assert np.all(observation["time_slack_to_window_start"] <= 1.0)
 
 
+def _assert_reward_is_valid(reward: float) -> None:
+    # Базовая часть награды теперь зависит от типа действия:
+    # skip -> -2, miss -> -1, success -> +1, плюс shaping по slack в диапазоне [-1, 1].
+    assert -3.0 <= reward <= 2.0
+
+
+def _copy_observation(observation: dict) -> dict:
+    return {
+        key: value.copy() if isinstance(value, np.ndarray) else value
+        for key, value in observation.items()
+    }
+
+
 def test_rl_env_masked_episode_smoke(rl_env: SimulatorEnv):
     observation, info = rl_env.reset(seed=42)
     _assert_observation_is_valid(rl_env, observation)
@@ -86,7 +99,7 @@ def test_rl_env_masked_episode_smoke(rl_env: SimulatorEnv):
         step_count += 1
         _assert_observation_is_valid(rl_env, observation)
         assert truncated is False
-        assert reward in (-1, 1)
+        _assert_reward_is_valid(reward)
         assert len(info["current_selection"]) == step_count
         assert info["missed_requests_num"] >= 0
         assert info["missed_requests_num"] <= len(info["current_selection"])
@@ -97,6 +110,103 @@ def test_rl_env_masked_episode_smoke(rl_env: SimulatorEnv):
 
     assert step_count == rl_env._current_env.requests_num
     assert len(rl_env._current_selection) == rl_env._current_env.requests_num
+
+
+def test_reward_uses_previous_observation_slack(rl_env: SimulatorEnv, monkeypatch: pytest.MonkeyPatch):
+    observation, _ = rl_env.reset(seed=42)
+    action_mask = rl_env.action_masks()
+    action = int(next(action for action in np.flatnonzero(action_mask) if action != 0))
+    truck_id = action - 1
+
+    previous_observation = _copy_observation(observation)
+    previous_observation["time_slack_to_window_start"][truck_id] = np.float32(0.0625)
+    rl_env._current_observation = previous_observation
+
+    truck_positions = [truck.position.current_point.model_copy(deep=True) for truck in rl_env._current_env.trucks]
+    truck_available_times = [0] * len(rl_env._current_env.trucks)
+
+    monkeypatch.setattr(
+        rl_env._simulator,
+        "run",
+        lambda selection, env: ([], truck_positions, truck_available_times)
+    )
+
+    original_create_observation = rl_env._obs_builder.create_observation
+
+    def fake_create_observation(*args, **kwargs):
+        next_observation = original_create_observation(*args, **kwargs)
+        next_observation["time_slack_to_window_start"][truck_id] = np.float32(-1.0)
+        return next_observation
+
+    monkeypatch.setattr(rl_env._obs_builder, "create_observation", fake_create_observation)
+
+    _, reward, _, truncated, _ = rl_env.step(action)
+
+    assert truncated is False
+    assert reward == pytest.approx(1.0 + rl_env._slack_penalty(0.0625))
+
+
+def test_reward_penalizes_skip_with_minus_two(rl_env: SimulatorEnv):
+    rl_env.reset(seed=42)
+    action_mask = rl_env.action_masks()
+
+    assert action_mask[0]
+
+    _, reward, _, truncated, info = rl_env.step(0)
+
+    assert truncated is False
+    assert reward == pytest.approx(-2.0)
+    assert info["current_selection"] == [-1]
+
+
+def test_reward_is_positive_for_successful_assignment(rl_env: SimulatorEnv, monkeypatch: pytest.MonkeyPatch):
+    observation, _ = rl_env.reset(seed=42)
+    action_mask = rl_env.action_masks()
+    action = int(next(action for action in np.flatnonzero(action_mask) if action != 0))
+    truck_id = action - 1
+
+    previous_observation = _copy_observation(observation)
+    previous_observation["time_slack_to_window_start"][truck_id] = np.float32(0.0)
+    rl_env._current_observation = previous_observation
+
+    truck_positions = [truck.position.current_point.model_copy(deep=True) for truck in rl_env._current_env.trucks]
+    truck_available_times = [0] * len(rl_env._current_env.trucks)
+    monkeypatch.setattr(
+        rl_env._simulator,
+        "run",
+        lambda selection, env: ([], truck_positions, truck_available_times)
+    )
+
+    _, reward, _, truncated, info = rl_env.step(action)
+
+    assert truncated is False
+    assert reward == pytest.approx(2.0)
+    assert info["missed_requests_num"] == 0
+
+
+def test_rl_env_step_runs_simulator_once(rl_env: SimulatorEnv):
+    rl_env.reset(seed=42)
+    original_run = rl_env._simulator.run
+    calls_num = 0
+
+    def counting_run(*args, **kwargs):
+        nonlocal calls_num
+        calls_num += 1
+        return original_run(*args, **kwargs)
+
+    rl_env._simulator.run = counting_run
+    try:
+        action_mask = rl_env.action_masks()
+        action = int(np.flatnonzero(action_mask)[0])
+        observation, reward, terminated, truncated, info = rl_env.step(action)
+    finally:
+        rl_env._simulator.run = original_run
+
+    assert calls_num == 1
+    _assert_observation_is_valid(rl_env, observation)
+    _assert_reward_is_valid(reward)
+    assert truncated is False
+    assert len(info["current_selection"]) == 1
 
 
 # # Запускает случайные действия, поэтому чтобы он не упал нужно запускать с _apply_restrictions_to_selection
