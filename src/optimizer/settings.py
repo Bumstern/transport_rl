@@ -28,6 +28,17 @@ class GeneratorSettings(BaseModel):
     model_config = ConfigDict(frozen=True)
 
 
+class ObservationFeatureConfig(BaseModel):
+    use_time_windows: bool = True
+    use_executed_requests: bool = True
+    use_unfinished_ratio: bool = True
+    use_current_selection: bool = True
+    use_next_request_tw: bool = True
+    use_pairwise_features: bool = True
+
+    model_config = ConfigDict(frozen=True)
+
+
 ENV_SETTINGS = EnvSettings()
 
 with open('input/generator_settings.json', 'r') as f:
@@ -35,3 +46,5 @@ with open('input/generator_settings.json', 'r') as f:
 
 GENERATOR_SETTINGS = GeneratorSettings(**__raw_gen_data)
 del __raw_gen_data
+
+DEFAULT_OBSERVATION_FEATURES = ObservationFeatureConfig()

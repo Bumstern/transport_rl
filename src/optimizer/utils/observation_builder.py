@@ -1,19 +1,25 @@
 import numpy as np
 
-from src.optimizer.settings import GENERATOR_SETTINGS
+from src.optimizer.settings import GENERATOR_SETTINGS, DEFAULT_OBSERVATION_FEATURES, ObservationFeatureConfig
 from src.simulator.environment import Environment
 from src.simulator.units.point import Point
 
 
 class ObservationBuilder:
 
-    def __init__(self, env: Environment, requests_constrains: list[list[int]]):
+    def __init__(
+            self,
+            env: Environment,
+            requests_constrains: list[list[int]],
+            feature_config: ObservationFeatureConfig = DEFAULT_OBSERVATION_FEATURES
+    ):
         """ Создатель наблюдений и разрешенной маски
         :param env: Объект Environment с заявками, машинами и прочим
         :param requests_constrains: Нужно передавать список разрешенных машин с добавленным [-1]
         """
         self._env = env
         self._req_constrains = requests_constrains
+        self._feature_config = feature_config
         self._static_obs = self._make_normalized_static_observation()
 
     @staticmethod
@@ -45,15 +51,20 @@ class ObservationBuilder:
 
     @staticmethod
     def _convert_obs_to_numpy(observation: dict) -> dict:
-
+        dtype_by_key = {
+            "time_windows": np.float32,
+            "executed_requests": np.int8,
+            "unfinished_ratio": np.float32,
+            "current_selection": np.int64,
+            "next_request_tw": np.float32,
+            "travel_time_to_load": np.float32,
+            "travel_time_with_cargo_to_unload": np.float32,
+            "earliness_to_window_start": np.float32,
+            "lateness_to_window_start": np.float32,
+        }
         return {
-            "time_windows": np.array(observation["time_windows"], dtype=np.float32),
-            "executed_requests": np.array(observation["executed_requests"], dtype=np.int8),
-            "unfinished_ratio": np.array(observation["unfinished_ratio"], dtype=np.float32),
-            "current_selection": np.array(observation["current_selection"], dtype=np.int64),
-            "next_request_tw": np.array(observation["next_request_tw"], dtype=np.float32),
-            "travel_time_to_load": np.array(observation["travel_time_to_load"], dtype=np.float32),
-            "time_slack_to_window_start": np.array(observation["time_slack_to_window_start"], dtype=np.float32),
+            key: np.array(value, dtype=dtype_by_key[key])
+            for key, value in observation.items()
         }
 
     def _normalize_observation(self, observation: dict) -> None:
@@ -73,11 +84,12 @@ class ObservationBuilder:
                     observation[key] = [observation[key][0] / self._env.end_date, observation[key][1] / self._env.end_date]
                 case "travel_time_to_load":
                     observation[key] = [min(travel_time / self._env.end_date, 1.0) for travel_time in observation[key]]
-                case "time_slack_to_window_start":
-                    observation[key] = [
-                        min(max(slack / self._env.end_date, -1.0), 1.0)
-                        for slack in observation[key]
-                    ]
+                case "travel_time_with_cargo_to_unload":
+                    observation[key] = [min(travel_time / self._env.end_date, 1.0) for travel_time in observation[key]]
+                case "earliness_to_window_start":
+                    observation[key] = [min(max(value / self._env.end_date, 0.0), 1.0) for value in observation[key]]
+                case "lateness_to_window_start":
+                    observation[key] = [min(max(value / self._env.end_date, 0.0), 1.0) for value in observation[key]]
                 case _:
                     raise NotImplementedError
 
@@ -91,9 +103,9 @@ class ObservationBuilder:
             time_windows.append(request_window)
         time_windows += [[0, 0]] * max_and_current_requests_len_delta
 
-        static_observation = {
-            "time_windows": time_windows
-        }
+        static_observation = {}
+        if self._feature_config.use_time_windows:
+            static_observation["time_windows"] = time_windows
 
         return static_observation
 
@@ -157,6 +169,31 @@ class ObservationBuilder:
             )
         return time_slack_to_window_start
 
+    def _get_travel_time_with_cargo_to_unload(self, current_selection: list[int]) -> list[int]:
+        travel_time_with_cargo_to_unload = [0] * GENERATOR_SETTINGS.max_truck_num
+        if len(current_selection) >= self._env.requests_num:
+            return travel_time_with_cargo_to_unload
+
+        next_request = self._env.requests[len(current_selection)]
+        for truck_id in range(len(self._env.trucks)):
+            if truck_id not in self._req_constrains[len(current_selection)]:
+                travel_time_with_cargo_to_unload[truck_id] = self._env.end_date
+                continue
+            travel_time_with_cargo_to_unload[truck_id] = self._env.route_manager.calculate_travel_time_to_point(
+                truck=self._env.trucks[truck_id],
+                with_cargo=True,
+                request=next_request,
+                departure_point=next_request.point_to_load,
+                destination_point=next_request.point_to_unload
+            )
+        return travel_time_with_cargo_to_unload
+
+    @staticmethod
+    def _split_slack_to_earliness_and_lateness(time_slack_to_window_start: list[int]) -> tuple[list[int], list[int]]:
+        earliness_to_window_start = [max(slack, 0) for slack in time_slack_to_window_start]
+        lateness_to_window_start = [max(-slack, 0) for slack in time_slack_to_window_start]
+        return earliness_to_window_start, lateness_to_window_start
+
     def create_observation(
             self,
             missed_requests_ids: list[int],
@@ -185,22 +222,30 @@ class ObservationBuilder:
         else:
             next_request_tw = [0, 0]
         travel_time_to_load = self._get_travel_time_to_load(current_selection, truck_positions)
+        travel_time_with_cargo_to_unload = self._get_travel_time_with_cargo_to_unload(current_selection)
         time_slack_to_window_start = self._get_time_slack_to_window_start(
             current_selection,
             travel_time_to_load,
             truck_available_times
         )
-        observation = {
-            "executed_requests": executed_requests,
-            "unfinished_ratio": unfinished_ratio,
-            "current_selection": selection_obs,
-            "next_request_tw": next_request_tw,
-            "travel_time_to_load": travel_time_to_load,
-            "time_slack_to_window_start": time_slack_to_window_start,
-        }
+        earliness_to_window_start, lateness_to_window_start = self._split_slack_to_earliness_and_lateness(
+            time_slack_to_window_start
+        )
+        observation = {}
+        if self._feature_config.use_executed_requests:
+            observation["executed_requests"] = executed_requests
+        if self._feature_config.use_unfinished_ratio:
+            observation["unfinished_ratio"] = unfinished_ratio
+        if self._feature_config.use_current_selection:
+            observation["current_selection"] = selection_obs
+        if self._feature_config.use_next_request_tw:
+            observation["next_request_tw"] = next_request_tw
+        if self._feature_config.use_pairwise_features:
+            observation["travel_time_to_load"] = travel_time_to_load
+            observation["travel_time_with_cargo_to_unload"] = travel_time_with_cargo_to_unload
+            observation["earliness_to_window_start"] = earliness_to_window_start
+            observation["lateness_to_window_start"] = lateness_to_window_start
         self._normalize_observation(observation)
         observation.update(self._static_obs)
 
         return self._convert_obs_to_numpy(observation)
-
-

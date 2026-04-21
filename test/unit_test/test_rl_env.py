@@ -6,7 +6,7 @@ import pytest
 from stable_baselines3.common.env_checker import check_env
 
 from src.optimizer.main import SimulatorEnv
-from src.optimizer.settings import GENERATOR_SETTINGS
+from src.optimizer.settings import GENERATOR_SETTINGS, DEFAULT_OBSERVATION_FEATURES
 from src.simulator.environment import Environment
 from src.simulator.model.simulator import Simulator
 from src.simulator.utils.data_generator.generator import InputDataGenerator
@@ -51,11 +51,17 @@ def test_simulator_run(simulator: Simulator, environment: Environment, requests_
 def _assert_observation_is_valid(rl_env: SimulatorEnv, observation: dict) -> None:
     assert rl_env.observation_space.contains(observation)
     assert observation["travel_time_to_load"].shape == (GENERATOR_SETTINGS.max_truck_num,)
-    assert observation["time_slack_to_window_start"].shape == (GENERATOR_SETTINGS.max_truck_num,)
+    assert observation["travel_time_with_cargo_to_unload"].shape == (GENERATOR_SETTINGS.max_truck_num,)
+    assert observation["earliness_to_window_start"].shape == (GENERATOR_SETTINGS.max_truck_num,)
+    assert observation["lateness_to_window_start"].shape == (GENERATOR_SETTINGS.max_truck_num,)
     assert np.all(observation["travel_time_to_load"] >= 0.0)
     assert np.all(observation["travel_time_to_load"] <= 1.0)
-    assert np.all(observation["time_slack_to_window_start"] >= -1.0)
-    assert np.all(observation["time_slack_to_window_start"] <= 1.0)
+    assert np.all(observation["travel_time_with_cargo_to_unload"] >= 0.0)
+    assert np.all(observation["travel_time_with_cargo_to_unload"] <= 1.0)
+    assert np.all(observation["earliness_to_window_start"] >= 0.0)
+    assert np.all(observation["earliness_to_window_start"] <= 1.0)
+    assert np.all(observation["lateness_to_window_start"] >= 0.0)
+    assert np.all(observation["lateness_to_window_start"] <= 1.0)
 
 
 def _assert_reward_is_valid(reward: float) -> None:
@@ -119,7 +125,8 @@ def test_reward_uses_previous_observation_slack(rl_env: SimulatorEnv, monkeypatc
     truck_id = action - 1
 
     previous_observation = _copy_observation(observation)
-    previous_observation["time_slack_to_window_start"][truck_id] = np.float32(0.0625)
+    previous_observation["earliness_to_window_start"][truck_id] = np.float32(0.0625)
+    previous_observation["lateness_to_window_start"][truck_id] = np.float32(0.0)
     rl_env._current_observation = previous_observation
 
     truck_positions = [truck.position.current_point.model_copy(deep=True) for truck in rl_env._current_env.trucks]
@@ -135,7 +142,8 @@ def test_reward_uses_previous_observation_slack(rl_env: SimulatorEnv, monkeypatc
 
     def fake_create_observation(*args, **kwargs):
         next_observation = original_create_observation(*args, **kwargs)
-        next_observation["time_slack_to_window_start"][truck_id] = np.float32(-1.0)
+        next_observation["earliness_to_window_start"][truck_id] = np.float32(0.0)
+        next_observation["lateness_to_window_start"][truck_id] = np.float32(1.0)
         return next_observation
 
     monkeypatch.setattr(rl_env._obs_builder, "create_observation", fake_create_observation)
@@ -166,7 +174,8 @@ def test_reward_is_positive_for_successful_assignment(rl_env: SimulatorEnv, monk
     truck_id = action - 1
 
     previous_observation = _copy_observation(observation)
-    previous_observation["time_slack_to_window_start"][truck_id] = np.float32(0.0)
+    previous_observation["earliness_to_window_start"][truck_id] = np.float32(0.0)
+    previous_observation["lateness_to_window_start"][truck_id] = np.float32(0.0)
     rl_env._current_observation = previous_observation
 
     truck_positions = [truck.position.current_point.model_copy(deep=True) for truck in rl_env._current_env.trucks]
@@ -207,6 +216,41 @@ def test_rl_env_step_runs_simulator_once(rl_env: SimulatorEnv):
     _assert_reward_is_valid(reward)
     assert truncated is False
     assert len(info["current_selection"]) == 1
+
+
+def test_rl_env_supports_observation_ablation_preset():
+    generator = InputDataGenerator(
+        load_point_names=GENERATOR_SETTINGS.load_point_names,
+        unload_point_names=GENERATOR_SETTINGS.unload_point_names,
+        requests_num_min=GENERATOR_SETTINGS.min_requests_num,
+        requests_num_max=GENERATOR_SETTINGS.max_requests_num,
+        trucks_num=GENERATOR_SETTINGS.max_truck_num,
+        simulator_start_date=datetime.strptime(GENERATOR_SETTINGS.simulator_start_date, '%d.%m.%Y'),
+        simulator_end_date=datetime.strptime(GENERATOR_SETTINGS.simulator_end_date, '%d.%m.%Y'),
+        capacities_variants=GENERATOR_SETTINGS.capacities_variants,
+        min_distance=GENERATOR_SETTINGS.min_distance,
+        max_distance=GENERATOR_SETTINGS.max_distance
+    )
+    feature_config = DEFAULT_OBSERVATION_FEATURES.model_copy(
+        update={
+            "use_current_selection": False,
+            "use_unfinished_ratio": False,
+            "use_executed_requests": False,
+        }
+    )
+    env = SimulatorEnv(generator, feature_config)
+
+    observation, info = env.reset(seed=42)
+
+    assert "current_selection" not in observation
+    assert "unfinished_ratio" not in observation
+    assert "executed_requests" not in observation
+    assert "current_selection" not in env.observation_space.spaces
+    assert "unfinished_ratio" not in env.observation_space.spaces
+    assert "executed_requests" not in env.observation_space.spaces
+    assert env.observation_space.contains(observation)
+    assert "unfinished_ratio" in info
+    assert info["unfinished_ratio"] == pytest.approx(np.array([0.0], dtype=np.float32))
 
 
 # # Запускает случайные действия, поэтому чтобы он не упал нужно запускать с _apply_restrictions_to_selection

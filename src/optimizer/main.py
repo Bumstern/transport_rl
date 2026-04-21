@@ -9,30 +9,24 @@ from src.optimizer.utils.observation_builder import ObservationBuilder
 from src.simulator.builder import get_env, get_requests_constraints
 from src.simulator.environment import Environment
 from src.simulator.model.simulator import Simulator
-from src.optimizer.settings import GENERATOR_SETTINGS
+from src.optimizer.settings import (
+    GENERATOR_SETTINGS,
+    DEFAULT_OBSERVATION_FEATURES,
+    ObservationFeatureConfig,
+)
 from src.simulator.utils.data_generator.generator import InputDataGenerator
 
 
 class SimulatorEnv(gymnasium.Env):
-    def __init__(self, input_generator: InputDataGenerator):
+    def __init__(
+            self,
+            input_generator: InputDataGenerator,
+            observation_feature_config: ObservationFeatureConfig = DEFAULT_OBSERVATION_FEATURES
+    ):
         # Пространство действий - это id машины [0, max_truck_num-1] + [-1]
         self.action_space = spaces.Discrete(GENERATOR_SETTINGS.max_truck_num+1)
-        self.observation_space = spaces.Dict({
-            # Массив с отнормированным временными окнами у заявок
-            "time_windows": spaces.Box(0.0, 1.0, shape=(GENERATOR_SETTINGS.max_requests_num, 2), dtype=np.float32),
-            # Бинарная маска с выполненными и невыполненными заявками
-            "executed_requests": spaces.MultiBinary(GENERATOR_SETTINGS.max_requests_num),
-            # Отношение выполненных заявок к невыполненным
-            "unfinished_ratio": spaces.Box(0.0, 1.0, shape=(1,), dtype=np.float32),
-            # Текущее распределение
-            "current_selection": spaces.Box(low=-1, high=GENERATOR_SETTINGS.max_truck_num - 1, shape=(GENERATOR_SETTINGS.max_requests_num,), dtype=np.int64),
-            # Временные окна следующей задачи
-            "next_request_tw": spaces.Box(0.0, 1.0, shape=(2,), dtype=np.float32),
-            # Время в пути до погрузки следующей заявки для каждой машины
-            "travel_time_to_load": spaces.Box(0.0, 1.0, shape=(GENERATOR_SETTINGS.max_truck_num,), dtype=np.float32),
-            # Запас по времени до начала окна погрузки следующей заявки
-            "time_slack_to_window_start": spaces.Box(-1.0, 1.0, shape=(GENERATOR_SETTINGS.max_truck_num,), dtype=np.float32),
-        })
+        self._observation_feature_config = observation_feature_config
+        self.observation_space = spaces.Dict(self._build_observation_space(observation_feature_config))
 
         self._static_obs = None     # Это неизменные наблюдения (как временные окна заявок и ограничения)
         self._simulator = Simulator()
@@ -46,6 +40,41 @@ class SimulatorEnv(gymnasium.Env):
         self._current_step = 1
         self._current_observation = None
 
+    @staticmethod
+    def _build_observation_space(feature_config: ObservationFeatureConfig) -> dict:
+        observation_space = {}
+        if feature_config.use_time_windows:
+            observation_space["time_windows"] = spaces.Box(
+                0.0, 1.0, shape=(GENERATOR_SETTINGS.max_requests_num, 2), dtype=np.float32
+            )
+        if feature_config.use_executed_requests:
+            observation_space["executed_requests"] = spaces.MultiBinary(GENERATOR_SETTINGS.max_requests_num)
+        if feature_config.use_unfinished_ratio:
+            observation_space["unfinished_ratio"] = spaces.Box(0.0, 1.0, shape=(1,), dtype=np.float32)
+        if feature_config.use_current_selection:
+            observation_space["current_selection"] = spaces.Box(
+                low=-1,
+                high=GENERATOR_SETTINGS.max_truck_num - 1,
+                shape=(GENERATOR_SETTINGS.max_requests_num,),
+                dtype=np.int64
+            )
+        if feature_config.use_next_request_tw:
+            observation_space["next_request_tw"] = spaces.Box(0.0, 1.0, shape=(2,), dtype=np.float32)
+        if feature_config.use_pairwise_features:
+            observation_space["travel_time_to_load"] = spaces.Box(
+                0.0, 1.0, shape=(GENERATOR_SETTINGS.max_truck_num,), dtype=np.float32
+            )
+            observation_space["travel_time_with_cargo_to_unload"] = spaces.Box(
+                0.0, 1.0, shape=(GENERATOR_SETTINGS.max_truck_num,), dtype=np.float32
+            )
+            observation_space["earliness_to_window_start"] = spaces.Box(
+                0.0, 1.0, shape=(GENERATOR_SETTINGS.max_truck_num,), dtype=np.float32
+            )
+            observation_space["lateness_to_window_start"] = spaces.Box(
+                0.0, 1.0, shape=(GENERATOR_SETTINGS.max_truck_num,), dtype=np.float32
+            )
+        return observation_space
+
     def reset(
         self,
         *,
@@ -57,7 +86,11 @@ class SimulatorEnv(gymnasium.Env):
         input_data, routes_data = self._generator.generate_all(None)
         self._current_env: Environment = get_env(input_data, routes_data)
         self._current_requests_constrains = get_requests_constraints(self._current_env, with_missed=True)
-        self._obs_builder = ObservationBuilder(self._current_env, self._current_requests_constrains)
+        self._obs_builder = ObservationBuilder(
+            self._current_env,
+            self._current_requests_constrains,
+            self._observation_feature_config
+        )
 
         self._current_selection = []
         self._current_step = 1
@@ -66,7 +99,7 @@ class SimulatorEnv(gymnasium.Env):
         self._current_observation = observation
         info = {
             "missed_requests_num": 0,
-            "unfinished_ratio": observation["unfinished_ratio"],
+            "unfinished_ratio": self._build_unfinished_ratio([], self._current_selection),
             "current_selection": self._current_selection
         }
 
@@ -91,6 +124,12 @@ class SimulatorEnv(gymnasium.Env):
                 print(f"Не выполнилось ограничение для заявки {request_id}! Пытались поставить {truck_id}.")
 
     @staticmethod
+    def _build_unfinished_ratio(missed_requests_ids: list[int], current_selection: list[int]) -> np.ndarray:
+        if len(current_selection) == 0:
+            return np.array([0.0], dtype=np.float32)
+        return np.array([len(missed_requests_ids) / len(current_selection)], dtype=np.float32)
+
+    @staticmethod
     def _slack_penalty(slack: float) -> float:
         if -1.0 <= slack < 0.0:
             return -(abs(slack) ** 2)
@@ -103,7 +142,10 @@ class SimulatorEnv(gymnasium.Env):
         if truck_id == -1:
             return 0.0
 
-        chosen_slack = float(observation_before_action["time_slack_to_window_start"][truck_id])
+        chosen_slack = (
+            float(observation_before_action["earliness_to_window_start"][truck_id])
+            - float(observation_before_action["lateness_to_window_start"][truck_id])
+        )
         return self._slack_penalty(chosen_slack)
 
     def _calculate_reward(
@@ -130,11 +172,12 @@ class SimulatorEnv(gymnasium.Env):
         # Проверяем, не превышен ли лимит заявок
         if len(self._current_selection) >= self._current_env.requests_num:
             observation = self._current_observation
-            return observation, 0.0, True, False, {
+            info = {
                 "missed_requests_num": 0,
-                "unfinished_ratio": observation["unfinished_ratio"],
+                "unfinished_ratio": self._build_unfinished_ratio([], self._current_selection),
                 "current_selection": self._current_selection
             }
+            return observation, 0.0, True, False, info
 
         observation_before_action = self._current_observation
 
@@ -171,7 +214,7 @@ class SimulatorEnv(gymnasium.Env):
         truncated = False
         info = {
             "missed_requests_num": len(missed_requests_ids),
-            "unfinished_ratio": observation["unfinished_ratio"],
+            "unfinished_ratio": self._build_unfinished_ratio(missed_requests_ids, self._current_selection),
             "current_selection": self._current_selection
         }
 
