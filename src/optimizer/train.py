@@ -2,14 +2,28 @@ import argparse
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import Callable
 
 from sb3_contrib import MaskablePPO
 from sb3_contrib.common.maskable.callbacks import MaskableEvalCallback
 from stable_baselines3.common.callbacks import BaseCallback
 
 from src.optimizer.main import SimulatorEnv
-from src.optimizer.settings import GENERATOR_SETTINGS
+from src.optimizer.settings import (
+    GENERATOR_SETTINGS,
+    DEFAULT_OBSERVATION_FEATURES,
+    ObservationFeatureConfig,
+)
 from src.simulator.utils.data_generator.generator import InputDataGenerator
+
+OBSERVATION_PRESETS = (
+    "all",
+    "no_current_selection",
+    "no_unfinished_ratio",
+    "no_current_selection_no_unfinished_ratio",
+    "no_executed_requests",
+    "pairwise_only",
+)
 
 
 @dataclass(frozen=True)
@@ -18,6 +32,9 @@ class TrainConfig:
     n_steps: int
     clip_range: float
     learning_rate: float
+    learning_rate_schedule: str
+    learning_rate_step_points: tuple[float, ...]
+    learning_rate_step_values: tuple[float, ...]
     net_arch: list[int]
     eval_freq: int
     seed: int | None
@@ -25,6 +42,8 @@ class TrainConfig:
     best_model_dir: Path
     tensorboard_dir: Path
     verbose: int
+    observation_feature_config: ObservationFeatureConfig
+    early_stop_patience_epochs: int
 
 
 class InfoLoggerCallback(BaseCallback):
@@ -35,7 +54,92 @@ class InfoLoggerCallback(BaseCallback):
                 self.logger.record("custom/missed_requests_num", info["missed_requests_num"])
             if "unfinished_ratio" in info:
                 self.logger.record("custom/unfinished_ratio", float(info["unfinished_ratio"][0]))
+        current_lr = self.model.policy.optimizer.param_groups[0]["lr"]
+        self.logger.record("train/learning_rate", current_lr)
         return True
+
+
+class EarlyStoppingCallback(BaseCallback):
+    def __init__(self, patience_epochs: int, verbose: int = 0):
+        super().__init__(verbose)
+        self._patience_epochs = patience_epochs
+        self._best_unfinished_ratio: float | None = None
+        self._epochs_since_improvement = 0
+
+    def _on_step(self) -> bool:
+        if self._patience_epochs <= 0:
+            return True
+
+        infos = self.locals.get("infos", [])
+        dones = self.locals.get("dones", [])
+
+        for done, info in zip(dones, infos):
+            if not done or "unfinished_ratio" not in info:
+                continue
+
+            current_unfinished_ratio = float(info["unfinished_ratio"][0])
+            if (
+                self._best_unfinished_ratio is None
+                or current_unfinished_ratio < self._best_unfinished_ratio
+            ):
+                self._best_unfinished_ratio = current_unfinished_ratio
+                self._epochs_since_improvement = 0
+            else:
+                self._epochs_since_improvement += 1
+
+        if self._best_unfinished_ratio is not None:
+            self.logger.record("train/best_unfinished_ratio", self._best_unfinished_ratio)
+        self.logger.record("train/epochs_since_improvement", self._epochs_since_improvement)
+
+        if self._epochs_since_improvement >= self._patience_epochs:
+            if self.verbose > 0:
+                print(
+                    "Early stopping triggered:"
+                    f" no improvement for {self._epochs_since_improvement} completed episodes."
+                )
+            return False
+        return True
+
+
+def quarter_decay_schedule(progress_remaining: float) -> float:
+    if progress_remaining >= 0.75:
+        return 3e-3
+    if progress_remaining >= 0.5:
+        return 7e-4
+    if progress_remaining >= 0.25:
+        return 4e-4
+    return 1e-4
+
+
+def _parse_float_tuple(raw_value: str) -> tuple[float, ...]:
+    return tuple(float(value.strip()) for value in raw_value.split(",") if value.strip())
+
+
+def build_piecewise_schedule(step_points: tuple[float, ...], step_values: tuple[float, ...]) -> Callable[[float], float]:
+    if len(step_values) != len(step_points) + 1:
+        raise ValueError("learning_rate_step_values must contain exactly one more value than learning_rate_step_points")
+    if any(point < 0.0 or point > 1.0 for point in step_points):
+        raise ValueError("learning_rate_step_points must be in [0, 1]")
+    if tuple(sorted(step_points, reverse=True)) != step_points:
+        raise ValueError("learning_rate_step_points must be sorted in descending order")
+
+    def schedule(progress_remaining: float) -> float:
+        for point, value in zip(step_points, step_values):
+            if progress_remaining >= point:
+                return value
+        return step_values[-1]
+
+    return schedule
+
+
+def build_learning_rate(config: TrainConfig):
+    if config.learning_rate_schedule == "quarter_decay":
+        return quarter_decay_schedule
+    if config.learning_rate_schedule == "piecewise":
+        return build_piecewise_schedule(config.learning_rate_step_points, config.learning_rate_step_values)
+    if config.learning_rate_schedule == "constant":
+        return config.learning_rate
+    raise ValueError(f"Unknown learning rate schedule: {config.learning_rate_schedule}")
 
 
 def build_generator() -> InputDataGenerator:
@@ -53,8 +157,33 @@ def build_generator() -> InputDataGenerator:
     )
 
 
-def build_env() -> SimulatorEnv:
-    return SimulatorEnv(build_generator())
+def get_observation_feature_config(preset: str) -> ObservationFeatureConfig:
+    presets = {
+        "all": DEFAULT_OBSERVATION_FEATURES,
+        "no_current_selection": DEFAULT_OBSERVATION_FEATURES.model_copy(update={"use_current_selection": False}),
+        "no_unfinished_ratio": DEFAULT_OBSERVATION_FEATURES.model_copy(update={"use_unfinished_ratio": False}),
+        "no_current_selection_no_unfinished_ratio": DEFAULT_OBSERVATION_FEATURES.model_copy(
+            update={
+                "use_current_selection": False,
+                "use_unfinished_ratio": False,
+            }
+        ),
+        "no_executed_requests": DEFAULT_OBSERVATION_FEATURES.model_copy(update={"use_executed_requests": False}),
+        "pairwise_only": DEFAULT_OBSERVATION_FEATURES.model_copy(
+            update={
+                "use_executed_requests": False,
+                "use_unfinished_ratio": False,
+                "use_current_selection": False,
+                "use_next_request_tw": True,
+                "use_time_windows": True,
+            }
+        ),
+    }
+    return presets[preset]
+
+
+def build_env(observation_feature_config: ObservationFeatureConfig) -> SimulatorEnv:
+    return SimulatorEnv(build_generator(), observation_feature_config)
 
 
 def ensure_output_dirs(config: TrainConfig) -> None:
@@ -69,7 +198,7 @@ def build_model(config: TrainConfig, env: SimulatorEnv) -> MaskablePPO:
         env,
         n_steps=config.n_steps,
         clip_range=config.clip_range,
-        learning_rate=config.learning_rate,
+        learning_rate=build_learning_rate(config),
         verbose=config.verbose,
         tensorboard_log=str(config.tensorboard_dir),
         seed=config.seed,
@@ -82,8 +211,8 @@ def build_model(config: TrainConfig, env: SimulatorEnv) -> MaskablePPO:
 def train(config: TrainConfig) -> Path:
     ensure_output_dirs(config)
 
-    train_env = build_env()
-    eval_env = build_env()
+    train_env = build_env(config.observation_feature_config)
+    eval_env = build_env(config.observation_feature_config)
     model = build_model(config, train_env)
 
     eval_callback = MaskableEvalCallback(
@@ -95,11 +224,15 @@ def train(config: TrainConfig) -> Path:
         render=False,
     )
     info_logger_callback = InfoLoggerCallback()
+    early_stopping_callback = EarlyStoppingCallback(
+        patience_epochs=config.early_stop_patience_epochs,
+        verbose=config.verbose,
+    )
 
     model.learn(
         total_timesteps=config.total_timesteps,
         progress_bar=True,
-        callback=[eval_callback, info_logger_callback],
+        callback=[eval_callback, info_logger_callback, early_stopping_callback],
     )
 
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
@@ -119,25 +252,43 @@ def parse_args() -> TrainConfig:
     parser.add_argument(
         "--n-steps",
         type=int,
-        default=256,
+        default=1024,
         help="Number of rollout steps per update.",
     )
     parser.add_argument(
         "--clip-range",
         type=float,
-        default=0.25,
+        default=0.1,
         help="PPO clip range.",
     )
     parser.add_argument(
         "--learning-rate",
         type=float,
-        default=3e-4,
-        help="Optimizer learning rate.",
+        default=7e-4,
+        help="Optimizer learning rate for constant schedule.",
+    )
+    parser.add_argument(
+        "--learning-rate-schedule",
+        choices=["constant", "quarter_decay", "piecewise"],
+        default="quarter_decay",
+        help="Learning rate schedule. quarter_decay uses 3e-3 -> 7e-4 -> 4e-4 -> 1e-4 across training quarters.",
+    )
+    parser.add_argument(
+        "--learning-rate-step-points",
+        type=str,
+        default="0.75,0.5,0.25",
+        help="Descending progress points for piecewise learning-rate schedule, e.g. '0.75,0.5,0.25'.",
+    )
+    parser.add_argument(
+        "--learning-rate-step-values",
+        type=str,
+        default="3e-3,7e-4,4e-4,1e-4",
+        help="Learning-rate values for piecewise schedule. Must contain one more value than step points.",
     )
     parser.add_argument(
         "--eval-freq",
         type=int,
-        default=2048,
+        default=4096,
         help="Evaluation frequency in environment steps.",
     )
     parser.add_argument(
@@ -170,6 +321,18 @@ def parse_args() -> TrainConfig:
         default=1,
         help="Stable-Baselines3 verbosity level.",
     )
+    parser.add_argument(
+        "--observation-preset",
+        choices=OBSERVATION_PRESETS,
+        default="all",
+        help="Observation ablation preset.",
+    )
+    parser.add_argument(
+        "--early-stop-patience-epochs",
+        type=int,
+        default=0,
+        help="Stop training if unfinished_ratio does not improve for this many completed episodes. 0 disables early stopping.",
+    )
     args = parser.parse_args()
 
     return TrainConfig(
@@ -177,6 +340,9 @@ def parse_args() -> TrainConfig:
         n_steps=args.n_steps,
         clip_range=args.clip_range,
         learning_rate=args.learning_rate,
+        learning_rate_schedule=args.learning_rate_schedule,
+        learning_rate_step_points=_parse_float_tuple(args.learning_rate_step_points),
+        learning_rate_step_values=_parse_float_tuple(args.learning_rate_step_values),
         net_arch=[128, 128, 128],
         eval_freq=args.eval_freq,
         seed=args.seed,
@@ -184,6 +350,8 @@ def parse_args() -> TrainConfig:
         best_model_dir=args.best_model_dir,
         tensorboard_dir=args.tensorboard_dir,
         verbose=args.verbose,
+        observation_feature_config=get_observation_feature_config(args.observation_preset),
+        early_stop_patience_epochs=args.early_stop_patience_epochs,
     )
 
 

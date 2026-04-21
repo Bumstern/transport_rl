@@ -9,7 +9,8 @@ import random
 from sb3_contrib import MaskablePPO
 
 from src.optimizer.main import SimulatorEnv
-from src.optimizer.settings import GENERATOR_SETTINGS
+from src.optimizer.settings import GENERATOR_SETTINGS, ObservationFeatureConfig
+from src.optimizer.train import OBSERVATION_PRESETS, get_observation_feature_config
 from src.simulator.utils.data_generator.generator import InputDataGenerator
 
 
@@ -21,6 +22,7 @@ class EvalConfig:
     deterministic: bool
     seed: int | None
     output_path: Path | None
+    observation_feature_config: ObservationFeatureConfig
 
 
 @dataclass(frozen=True)
@@ -29,7 +31,7 @@ class EpisodeMetrics:
     requests_num: int
     reward: float
     missed_requests_num: int
-    unfinished_ratio: float
+    unfinished_ratio: float | None
     served_requests_num: int
     skip_count: int
     skip_rate: float
@@ -49,9 +51,8 @@ def build_generator() -> InputDataGenerator:
         max_distance=GENERATOR_SETTINGS.max_distance,
     )
 
-
-def build_env() -> SimulatorEnv:
-    return SimulatorEnv(build_generator())
+def build_env(observation_feature_config: ObservationFeatureConfig) -> SimulatorEnv:
+    return SimulatorEnv(build_generator(), observation_feature_config)
 
 
 def select_action(
@@ -88,7 +89,7 @@ def select_action(
 
 
 def evaluate(config: EvalConfig) -> tuple[list[EpisodeMetrics], dict]:
-    env = build_env()
+    env = build_env(config.observation_feature_config)
     model = MaskablePPO.load(str(config.model_path)) if config.policy == "model" else None
 
     episode_metrics: list[EpisodeMetrics] = []
@@ -135,7 +136,11 @@ def evaluate(config: EvalConfig) -> tuple[list[EpisodeMetrics], dict]:
                 requests_num=env._current_env.requests_num,
                 reward=float(cumulative_reward),
                 missed_requests_num=int(last_info["missed_requests_num"]),
-                unfinished_ratio=float(last_info["unfinished_ratio"][0]),
+                unfinished_ratio=(
+                    float(last_info["unfinished_ratio"][0])
+                    if "unfinished_ratio" in last_info
+                    else None
+                ),
                 served_requests_num=served_requests_num,
                 skip_count=skip_count,
                 skip_rate=skip_count / env._current_env.requests_num,
@@ -150,9 +155,9 @@ def evaluate(config: EvalConfig) -> tuple[list[EpisodeMetrics], dict]:
         "episodes": config.episodes,
         "deterministic": config.deterministic,
         "seed": config.seed,
+        "observation_feature_config": config.observation_feature_config.model_dump(),
         "avg_reward": mean(metric.reward for metric in episode_metrics),
         "avg_missed_requests_num": mean(metric.missed_requests_num for metric in episode_metrics),
-        "avg_unfinished_ratio": mean(metric.unfinished_ratio for metric in episode_metrics),
         "avg_served_requests_num": mean(metric.served_requests_num for metric in episode_metrics),
         "avg_skip_count": mean(metric.skip_count for metric in episode_metrics),
         "avg_skip_rate": mean(metric.skip_rate for metric in episode_metrics),
@@ -162,6 +167,10 @@ def evaluate(config: EvalConfig) -> tuple[list[EpisodeMetrics], dict]:
             sum(metric.missed_requests_num == 0 for metric in episode_metrics) / len(episode_metrics)
         ),
     }
+    unfinished_ratios = [metric.unfinished_ratio for metric in episode_metrics if metric.unfinished_ratio is not None]
+    summary["avg_unfinished_ratio"] = (
+        mean(unfinished_ratios) if unfinished_ratios else None
+    )
     return episode_metrics, summary
 
 
@@ -178,6 +187,7 @@ def save_report(
             "episodes": config.episodes,
             "deterministic": config.deterministic,
             "seed": config.seed,
+            "observation_feature_config": config.observation_feature_config.model_dump(),
         },
         "summary": summary,
         "episodes": [asdict(metric) for metric in episode_metrics],
@@ -230,6 +240,12 @@ def parse_args() -> EvalConfig:
         default=None,
         help="Optional path to save the evaluation report as JSON.",
     )
+    parser.add_argument(
+        "--observation-preset",
+        choices=OBSERVATION_PRESETS,
+        default="all",
+        help="Observation ablation preset.",
+    )
     args = parser.parse_args()
     if args.policy == "model" and args.model_path is None:
         parser.error("--model-path is required when --policy model is used.")
@@ -241,6 +257,7 @@ def parse_args() -> EvalConfig:
         deterministic=not args.stochastic,
         seed=args.seed,
         output_path=args.output_path,
+        observation_feature_config=get_observation_feature_config(args.observation_preset),
     )
 
 
