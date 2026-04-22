@@ -6,6 +6,7 @@ from typing import Callable
 
 from sb3_contrib import MaskablePPO
 from sb3_contrib.common.maskable.callbacks import MaskableEvalCallback
+from sb3_contrib.common.maskable.utils import get_action_masks
 from stable_baselines3.common.callbacks import BaseCallback
 
 from src.optimizer.main import SimulatorEnv
@@ -43,31 +44,80 @@ class TrainConfig:
     tensorboard_dir: Path
     verbose: int
     observation_feature_config: ObservationFeatureConfig
-    early_stop_patience_epochs: int
+    early_stop_patience_episodes: int
 
 
-class InfoLoggerCallback(BaseCallback):
+class EpisodeLoggerCallback(BaseCallback):
     def _on_step(self) -> bool:
         infos = self.locals.get("infos", [])
-        for info in infos:
+        dones = self.locals.get("dones", [])
+        for done, info in zip(dones, infos):
+            if not done:
+                continue
             if "missed_requests_num" in info:
-                self.logger.record("custom/missed_requests_num", info["missed_requests_num"])
+                self.logger.record("episode/missed_requests_num", info["missed_requests_num"])
             if "unfinished_ratio" in info:
-                self.logger.record("custom/unfinished_ratio", float(info["unfinished_ratio"][0]))
+                self.logger.record("episode/unfinished_ratio", float(info["unfinished_ratio"][0]))
         current_lr = self.model.policy.optimizer.param_groups[0]["lr"]
         self.logger.record("train/learning_rate", current_lr)
         return True
 
 
+class MetricsEvalCallback(MaskableEvalCallback):
+    def _on_step(self) -> bool:
+        should_run_eval = self.eval_freq > 0 and self.n_calls % self.eval_freq == 0
+        should_continue = super()._on_step()
+        if should_run_eval:
+            self._log_eval_metrics()
+        return should_continue
+
+    def _log_eval_metrics(self) -> None:
+        observation = self.eval_env.reset()
+        completed_episodes = 0
+        missed_requests_nums: list[int] = []
+        unfinished_ratios: list[float] = []
+
+        while completed_episodes < self.n_eval_episodes:
+            action_masks = get_action_masks(self.eval_env)
+            actions, _ = self.model.predict(
+                observation,
+                action_masks=action_masks,
+                deterministic=self.deterministic,
+            )
+            observation, _, dones, infos = self.eval_env.step(actions)
+
+            for done, info in zip(dones, infos):
+                if not done:
+                    continue
+                if "missed_requests_num" in info:
+                    missed_requests_nums.append(int(info["missed_requests_num"]))
+                if "unfinished_ratio" in info:
+                    unfinished_ratios.append(float(info["unfinished_ratio"][0]))
+                completed_episodes += 1
+                if completed_episodes >= self.n_eval_episodes:
+                    break
+
+        if missed_requests_nums:
+            self.logger.record(
+                "eval/avg_missed_requests_num",
+                sum(missed_requests_nums) / len(missed_requests_nums),
+            )
+        if unfinished_ratios:
+            self.logger.record(
+                "eval/avg_unfinished_ratio",
+                sum(unfinished_ratios) / len(unfinished_ratios),
+            )
+
+
 class EarlyStoppingCallback(BaseCallback):
-    def __init__(self, patience_epochs: int, verbose: int = 0):
+    def __init__(self, patience_episodes: int, verbose: int = 0):
         super().__init__(verbose)
-        self._patience_epochs = patience_epochs
+        self._patience_episodes = patience_episodes
         self._best_unfinished_ratio: float | None = None
-        self._epochs_since_improvement = 0
+        self._episodes_since_improvement = 0
 
     def _on_step(self) -> bool:
-        if self._patience_epochs <= 0:
+        if self._patience_episodes <= 0:
             return True
 
         infos = self.locals.get("infos", [])
@@ -83,19 +133,19 @@ class EarlyStoppingCallback(BaseCallback):
                 or current_unfinished_ratio < self._best_unfinished_ratio
             ):
                 self._best_unfinished_ratio = current_unfinished_ratio
-                self._epochs_since_improvement = 0
+                self._episodes_since_improvement = 0
             else:
-                self._epochs_since_improvement += 1
+                self._episodes_since_improvement += 1
 
         if self._best_unfinished_ratio is not None:
             self.logger.record("train/best_unfinished_ratio", self._best_unfinished_ratio)
-        self.logger.record("train/epochs_since_improvement", self._epochs_since_improvement)
+        self.logger.record("train/episodes_since_improvement", self._episodes_since_improvement)
 
-        if self._epochs_since_improvement >= self._patience_epochs:
+        if self._episodes_since_improvement >= self._patience_episodes:
             if self.verbose > 0:
                 print(
                     "Early stopping triggered:"
-                    f" no improvement for {self._epochs_since_improvement} completed episodes."
+                    f" no improvement for {self._episodes_since_improvement} completed episodes."
                 )
             return False
         return True
@@ -215,24 +265,25 @@ def train(config: TrainConfig) -> Path:
     eval_env = build_env(config.observation_feature_config)
     model = build_model(config, train_env)
 
-    eval_callback = MaskableEvalCallback(
+    eval_callback = MetricsEvalCallback(
         eval_env,
         best_model_save_path=str(config.best_model_dir),
         log_path=str(config.tensorboard_dir),
         eval_freq=config.eval_freq,
+        n_eval_episodes=10,
         deterministic=True,
         render=False,
     )
-    info_logger_callback = InfoLoggerCallback()
+    episode_logger_callback = EpisodeLoggerCallback()
     early_stopping_callback = EarlyStoppingCallback(
-        patience_epochs=config.early_stop_patience_epochs,
+        patience_episodes=config.early_stop_patience_episodes,
         verbose=config.verbose,
     )
 
     model.learn(
         total_timesteps=config.total_timesteps,
         progress_bar=True,
-        callback=[eval_callback, info_logger_callback, early_stopping_callback],
+        callback=[eval_callback, episode_logger_callback, early_stopping_callback],
     )
 
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
@@ -328,8 +379,10 @@ def parse_args() -> TrainConfig:
         help="Observation ablation preset.",
     )
     parser.add_argument(
+        "--early-stop-patience-episodes",
         "--early-stop-patience-epochs",
         type=int,
+        dest="early_stop_patience_episodes",
         default=0,
         help="Stop training if unfinished_ratio does not improve for this many completed episodes. 0 disables early stopping.",
     )
@@ -351,7 +404,7 @@ def parse_args() -> TrainConfig:
         tensorboard_dir=args.tensorboard_dir,
         verbose=args.verbose,
         observation_feature_config=get_observation_feature_config(args.observation_preset),
-        early_stop_patience_epochs=args.early_stop_patience_epochs,
+        early_stop_patience_episodes=args.early_stop_patience_episodes,
     )
 
 

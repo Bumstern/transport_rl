@@ -21,7 +21,7 @@ def build_train_config(
     learning_rate: float,
     eval_freq: int,
     verbose: int,
-    early_stop_patience_epochs: int,
+    early_stop_patience_episodes: int,
 ) -> TrainConfig:
     preset_dir = base_dir / preset
     preset_dir.mkdir(parents=True, exist_ok=True)
@@ -42,7 +42,7 @@ def build_train_config(
         tensorboard_dir=preset_dir / "tb",
         verbose=verbose,
         observation_feature_config=get_observation_feature_config(preset),
-        early_stop_patience_epochs=early_stop_patience_epochs,
+        early_stop_patience_episodes=early_stop_patience_episodes,
     )
 
 
@@ -135,8 +135,10 @@ def parse_args() -> argparse.Namespace:
         help="Number of episodes for post-training evaluation.",
     )
     parser.add_argument(
+        "--early-stop-patience-episodes",
         "--early-stop-patience-epochs",
         type=int,
+        dest="early_stop_patience_episodes",
         default=0,
         help="Stop training if unfinished_ratio does not improve for this many completed episodes. 0 disables early stopping.",
     )
@@ -160,7 +162,7 @@ def main() -> None:
             learning_rate=args.learning_rate,
             eval_freq=args.eval_freq,
             verbose=args.verbose,
-            early_stop_patience_epochs=args.early_stop_patience_epochs,
+            early_stop_patience_episodes=args.early_stop_patience_episodes,
         )
         last_model_path = train(train_config)
         best_model_path = train_config.best_model_dir / "best_model.zip"
