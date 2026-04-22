@@ -1,4 +1,3 @@
-import random
 from datetime import datetime
 
 import pytest
@@ -25,13 +24,12 @@ def input_generator() -> InputDataGenerator:
         capacities_variants=GENERATOR_SETTINGS.capacities_variants,
         min_distance=GENERATOR_SETTINGS.min_distance,
         max_distance=GENERATOR_SETTINGS.max_distance,
+        seed=42,
     )
 
 
 @pytest.fixture(scope='module')
 def environment(input_generator: InputDataGenerator):
-    # Фиксируем seed, чтобы unit-тесты не плавали из-за случайной генерации данных.
-    random.seed(42)
     input_data, routes_data = input_generator.generate_all(None)
     env: Environment = get_env(input_data, routes_data)
     return env

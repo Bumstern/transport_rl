@@ -38,6 +38,7 @@ class TrainConfig:
     learning_rate_step_values: tuple[float, ...]
     net_arch: list[int]
     eval_freq: int
+    n_eval_episodes: int
     seed: int | None
     model_dir: Path
     best_model_dir: Path
@@ -192,7 +193,7 @@ def build_learning_rate(config: TrainConfig):
     raise ValueError(f"Unknown learning rate schedule: {config.learning_rate_schedule}")
 
 
-def build_generator() -> InputDataGenerator:
+def build_generator(seed: int | None = None) -> InputDataGenerator:
     return InputDataGenerator(
         load_point_names=GENERATOR_SETTINGS.load_point_names,
         unload_point_names=GENERATOR_SETTINGS.unload_point_names,
@@ -204,6 +205,7 @@ def build_generator() -> InputDataGenerator:
         capacities_variants=GENERATOR_SETTINGS.capacities_variants,
         min_distance=GENERATOR_SETTINGS.min_distance,
         max_distance=GENERATOR_SETTINGS.max_distance,
+        seed=seed,
     )
 
 
@@ -232,8 +234,23 @@ def get_observation_feature_config(preset: str) -> ObservationFeatureConfig:
     return presets[preset]
 
 
-def build_env(observation_feature_config: ObservationFeatureConfig) -> SimulatorEnv:
-    return SimulatorEnv(build_generator(), observation_feature_config)
+def build_fixed_instances(count: int, seed: int | None) -> list[tuple[dict, list[dict]]]:
+    if count <= 0:
+        raise ValueError("count must be positive")
+    return build_generator(seed=seed).generate_many(count)
+
+
+def build_env(
+    observation_feature_config: ObservationFeatureConfig,
+    *,
+    seed: int | None = None,
+    fixed_instances: list[tuple[dict, list[dict]]] | None = None,
+) -> SimulatorEnv:
+    return SimulatorEnv(
+        build_generator(seed=seed),
+        observation_feature_config,
+        fixed_instances=fixed_instances,
+    )
 
 
 def ensure_output_dirs(config: TrainConfig) -> None:
@@ -261,8 +278,14 @@ def build_model(config: TrainConfig, env: SimulatorEnv) -> MaskablePPO:
 def train(config: TrainConfig) -> Path:
     ensure_output_dirs(config)
 
-    train_env = build_env(config.observation_feature_config)
-    eval_env = build_env(config.observation_feature_config)
+    train_env = build_env(config.observation_feature_config, seed=config.seed)
+    eval_seed = None if config.seed is None else config.seed + 1
+    eval_instances = build_fixed_instances(config.n_eval_episodes, seed=eval_seed)
+    eval_env = build_env(
+        config.observation_feature_config,
+        seed=eval_seed,
+        fixed_instances=eval_instances,
+    )
     model = build_model(config, train_env)
 
     eval_callback = MetricsEvalCallback(
@@ -270,7 +293,7 @@ def train(config: TrainConfig) -> Path:
         best_model_save_path=str(config.best_model_dir),
         log_path=str(config.tensorboard_dir),
         eval_freq=config.eval_freq,
-        n_eval_episodes=10,
+        n_eval_episodes=config.n_eval_episodes,
         deterministic=True,
         render=False,
     )
@@ -343,6 +366,12 @@ def parse_args() -> TrainConfig:
         help="Evaluation frequency in environment steps.",
     )
     parser.add_argument(
+        "--eval-episodes",
+        type=int,
+        default=10,
+        help="Number of fixed evaluation instances created once at training start.",
+    )
+    parser.add_argument(
         "--seed",
         type=int,
         default=None,
@@ -398,6 +427,7 @@ def parse_args() -> TrainConfig:
         learning_rate_step_values=_parse_float_tuple(args.learning_rate_step_values),
         net_arch=[128, 128, 128],
         eval_freq=args.eval_freq,
+        n_eval_episodes=args.eval_episodes,
         seed=args.seed,
         model_dir=args.model_dir,
         best_model_dir=args.best_model_dir,

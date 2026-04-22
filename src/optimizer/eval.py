@@ -4,7 +4,8 @@ from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
 from statistics import mean
-import random
+
+import numpy as np
 
 from sb3_contrib import MaskablePPO
 
@@ -37,7 +38,7 @@ class EpisodeMetrics:
     skip_rate: float
 
 
-def build_generator() -> InputDataGenerator:
+def build_generator(seed: int | None = None) -> InputDataGenerator:
     return InputDataGenerator(
         load_point_names=GENERATOR_SETTINGS.load_point_names,
         unload_point_names=GENERATOR_SETTINGS.unload_point_names,
@@ -49,10 +50,26 @@ def build_generator() -> InputDataGenerator:
         capacities_variants=GENERATOR_SETTINGS.capacities_variants,
         min_distance=GENERATOR_SETTINGS.min_distance,
         max_distance=GENERATOR_SETTINGS.max_distance,
+        seed=seed,
     )
 
-def build_env(observation_feature_config: ObservationFeatureConfig) -> SimulatorEnv:
-    return SimulatorEnv(build_generator(), observation_feature_config)
+def build_fixed_instances(count: int, seed: int | None) -> list[tuple[dict, list[dict]]]:
+    if count <= 0:
+        raise ValueError("count must be positive")
+    return build_generator(seed=seed).generate_many(count)
+
+
+def build_env(
+    observation_feature_config: ObservationFeatureConfig,
+    *,
+    seed: int | None = None,
+    fixed_instances: list[tuple[dict, list[dict]]] | None = None,
+) -> SimulatorEnv:
+    return SimulatorEnv(
+        build_generator(seed=seed),
+        observation_feature_config,
+        fixed_instances=fixed_instances,
+    )
 
 
 def select_action(
@@ -61,6 +78,7 @@ def select_action(
     observation,
     model: MaskablePPO | None,
     deterministic: bool,
+    rng: np.random.Generator,
 ) -> int:
     action_mask = env.action_masks()
     allowed_actions = [action for action, is_allowed in enumerate(action_mask) if is_allowed]
@@ -81,7 +99,7 @@ def select_action(
 
     non_skip_actions = [action for action in allowed_actions if action != 0]
     if policy == "random_valid_action":
-        return random.choice(allowed_actions)
+        return int(rng.choice(np.array(allowed_actions, dtype=np.int64)))
     if policy == "first_valid_truck":
         return non_skip_actions[0] if non_skip_actions else 0
 
@@ -89,18 +107,20 @@ def select_action(
 
 
 def evaluate(config: EvalConfig) -> tuple[list[EpisodeMetrics], dict]:
-    env = build_env(config.observation_feature_config)
+    eval_instances = build_fixed_instances(config.episodes, seed=config.seed)
+    env = build_env(
+        config.observation_feature_config,
+        seed=config.seed,
+        fixed_instances=eval_instances,
+    )
     model = MaskablePPO.load(str(config.model_path)) if config.policy == "model" else None
+    rng = np.random.default_rng(config.seed)
 
     episode_metrics: list[EpisodeMetrics] = []
     for episode_id in range(config.episodes):
-        episode_seed = None if config.seed is None else config.seed + episode_id
-        if episode_seed is not None:
-            random.seed(episode_seed)
-
         # Для каждого эпизода пересоздаем задачу через env.reset(...)
         # и затем прогоняем политику до terminal state.
-        observation, _ = env.reset(seed=episode_seed)
+        observation, _ = env.reset()
         terminated = False
         cumulative_reward = 0.0
         last_info = None
@@ -115,6 +135,7 @@ def evaluate(config: EvalConfig) -> tuple[list[EpisodeMetrics], dict]:
                 observation=observation,
                 model=model,
                 deterministic=config.deterministic,
+                rng=rng,
             )
             if action == 0:
                 # В action space значение 0 соответствует truck_id = -1, то есть skip.

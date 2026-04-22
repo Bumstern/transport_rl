@@ -24,7 +24,8 @@ def rl_env() -> SimulatorEnv:
         simulator_end_date=datetime.strptime(GENERATOR_SETTINGS.simulator_end_date, '%d.%m.%Y'),
         capacities_variants=GENERATOR_SETTINGS.capacities_variants,
         min_distance=GENERATOR_SETTINGS.min_distance,
-        max_distance=GENERATOR_SETTINGS.max_distance
+        max_distance=GENERATOR_SETTINGS.max_distance,
+        seed=42,
     )
     env = SimulatorEnv(generator)
     return env
@@ -229,7 +230,8 @@ def test_rl_env_supports_observation_ablation_preset():
         simulator_end_date=datetime.strptime(GENERATOR_SETTINGS.simulator_end_date, '%d.%m.%Y'),
         capacities_variants=GENERATOR_SETTINGS.capacities_variants,
         min_distance=GENERATOR_SETTINGS.min_distance,
-        max_distance=GENERATOR_SETTINGS.max_distance
+        max_distance=GENERATOR_SETTINGS.max_distance,
+        seed=42,
     )
     feature_config = DEFAULT_OBSERVATION_FEATURES.model_copy(
         update={
@@ -251,6 +253,56 @@ def test_rl_env_supports_observation_ablation_preset():
     assert env.observation_space.contains(observation)
     assert "unfinished_ratio" in info
     assert info["unfinished_ratio"] == pytest.approx(np.array([0.0], dtype=np.float32))
+
+
+def test_reset_with_same_seed_recreates_same_instance(rl_env: SimulatorEnv):
+    first_observation, _ = rl_env.reset(seed=123)
+    first_requests_num = rl_env._current_env.requests_num
+    first_request_names = [request.info.name for request in rl_env._current_env.requests]
+    first_time_windows = first_observation["time_windows"].copy()
+
+    second_observation, _ = rl_env.reset(seed=123)
+
+    assert rl_env._current_env.requests_num == first_requests_num
+    assert [request.info.name for request in rl_env._current_env.requests] == first_request_names
+    assert np.array_equal(second_observation["time_windows"], first_time_windows)
+
+
+def test_fixed_instances_cycle_deterministically():
+    generator = InputDataGenerator(
+        load_point_names=GENERATOR_SETTINGS.load_point_names,
+        unload_point_names=GENERATOR_SETTINGS.unload_point_names,
+        requests_num_min=GENERATOR_SETTINGS.min_requests_num,
+        requests_num_max=GENERATOR_SETTINGS.max_requests_num,
+        trucks_num=GENERATOR_SETTINGS.max_truck_num,
+        simulator_start_date=datetime.strptime(GENERATOR_SETTINGS.simulator_start_date, '%d.%m.%Y'),
+        simulator_end_date=datetime.strptime(GENERATOR_SETTINGS.simulator_end_date, '%d.%m.%Y'),
+        capacities_variants=GENERATOR_SETTINGS.capacities_variants,
+        min_distance=GENERATOR_SETTINGS.min_distance,
+        max_distance=GENERATOR_SETTINGS.max_distance,
+        seed=7,
+    )
+    fixed_instances = generator.generate_many(2)
+    env = SimulatorEnv(generator, fixed_instances=fixed_instances)
+
+    env.reset()
+    first_signature = (
+        env._current_env.requests_num,
+        [request.point_to_load.name for request in env._current_env.requests],
+    )
+    env.reset()
+    second_signature = (
+        env._current_env.requests_num,
+        [request.point_to_load.name for request in env._current_env.requests],
+    )
+    env.reset()
+    cycled_signature = (
+        env._current_env.requests_num,
+        [request.point_to_load.name for request in env._current_env.requests],
+    )
+
+    assert first_signature != second_signature
+    assert cycled_signature == first_signature
 
 
 # # Запускает случайные действия, поэтому чтобы он не упал нужно запускать с _apply_restrictions_to_selection

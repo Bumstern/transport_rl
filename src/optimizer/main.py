@@ -1,3 +1,4 @@
+import copy
 from typing import Optional, Tuple
 
 import gymnasium
@@ -21,7 +22,8 @@ class SimulatorEnv(gymnasium.Env):
     def __init__(
             self,
             input_generator: InputDataGenerator,
-            observation_feature_config: ObservationFeatureConfig = DEFAULT_OBSERVATION_FEATURES
+            observation_feature_config: ObservationFeatureConfig = DEFAULT_OBSERVATION_FEATURES,
+            fixed_instances: list[tuple[dict, list[dict]]] | None = None,
     ):
         # Пространство действий - это id машины [0, max_truck_num-1] + [-1]
         self.action_space = spaces.Discrete(GENERATOR_SETTINGS.max_truck_num+1)
@@ -33,6 +35,8 @@ class SimulatorEnv(gymnasium.Env):
         self._current_env: Environment = None
         self._current_requests_constrains = None
         self._generator = input_generator
+        self._fixed_instances = fixed_instances or []
+        self._fixed_instance_cursor = 0
         self._max_selection_len = -1
         self._obs_builder = None
 
@@ -83,7 +87,15 @@ class SimulatorEnv(gymnasium.Env):
     ) -> Tuple[ObsType, dict]:
         super().reset(seed=seed)
 
-        input_data, routes_data = self._generator.generate_all(None)
+        if self._fixed_instances:
+            if seed is not None:
+                self._fixed_instance_cursor = seed % len(self._fixed_instances)
+            input_data, routes_data = copy.deepcopy(self._fixed_instances[self._fixed_instance_cursor])
+            self._fixed_instance_cursor = (self._fixed_instance_cursor + 1) % len(self._fixed_instances)
+        else:
+            if seed is not None:
+                self._generator.reseed(seed)
+            input_data, routes_data = self._generator.generate_all(None)
         self._current_env: Environment = get_env(input_data, routes_data)
         self._current_requests_constrains = get_requests_constraints(self._current_env, with_missed=True)
         self._obs_builder = ObservationBuilder(

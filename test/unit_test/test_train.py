@@ -3,8 +3,11 @@ import numpy as np
 
 from src.optimizer.train import EarlyStoppingCallback
 from src.optimizer.train import EpisodeLoggerCallback
+from src.optimizer.train import build_fixed_instances
 from src.optimizer.train import build_piecewise_schedule
+from src.optimizer.train import build_env
 from src.optimizer.train import quarter_decay_schedule
+from src.optimizer.settings import DEFAULT_OBSERVATION_FEATURES
 
 
 class DummyLogger:
@@ -157,3 +160,38 @@ def test_early_stopping_callback_ignores_unfinished_ratio_until_episode_done() -
     assert callback._on_step() is True
     assert callback._best_unfinished_ratio is None
     assert callback._episodes_since_improvement == 0
+
+
+def test_build_fixed_instances_is_deterministic_for_same_seed() -> None:
+    first_instances = build_fixed_instances(3, seed=123)
+    second_instances = build_fixed_instances(3, seed=123)
+
+    assert first_instances == second_instances
+
+
+def test_build_env_cycles_over_fixed_instances() -> None:
+    fixed_instances = build_fixed_instances(2, seed=321)
+    env = build_env(
+        DEFAULT_OBSERVATION_FEATURES,
+        seed=321,
+        fixed_instances=fixed_instances,
+    )
+
+    env.reset()
+    first_signature = (
+        env._current_env.requests_num,
+        [request.point_to_load.name for request in env._current_env.requests],
+    )
+    env.reset()
+    second_signature = (
+        env._current_env.requests_num,
+        [request.point_to_load.name for request in env._current_env.requests],
+    )
+    env.reset()
+    cycled_signature = (
+        env._current_env.requests_num,
+        [request.point_to_load.name for request in env._current_env.requests],
+    )
+
+    assert first_signature != second_signature
+    assert cycled_signature == first_signature
