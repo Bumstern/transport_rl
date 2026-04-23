@@ -15,6 +15,11 @@ from src.optimizer.settings import (
     DEFAULT_OBSERVATION_FEATURES,
     ObservationFeatureConfig,
 )
+from src.optimizer.train_pool import (
+    TrainInstanceSampler,
+    TrainPoolEnvWrapper,
+    build_train_pool_seeds,
+)
 from src.simulator.utils.data_generator.generator import InputDataGenerator
 
 OBSERVATION_PRESETS = (
@@ -40,6 +45,9 @@ class TrainConfig:
     eval_freq: int
     n_eval_episodes: int
     seed: int | None
+    train_pool_size: int
+    train_pool_seed: int | None
+    fixed_pool_ratio: float
     model_dir: Path
     best_model_dir: Path
     tensorboard_dir: Path
@@ -278,7 +286,17 @@ def build_model(config: TrainConfig, env: SimulatorEnv) -> MaskablePPO:
 def train(config: TrainConfig) -> Path:
     ensure_output_dirs(config)
 
-    train_env = build_env(config.observation_feature_config, seed=config.seed)
+    train_pool_seeds = build_train_pool_seeds(config.train_pool_size, config.train_pool_seed)
+    train_sampler = TrainInstanceSampler(
+        pool_seeds=train_pool_seeds,
+        fixed_pool_ratio=config.fixed_pool_ratio,
+        selection_seed=config.seed,
+        fresh_seed=None if config.seed is None else config.seed + 10_000,
+    )
+    train_env = TrainPoolEnvWrapper(
+        build_env(config.observation_feature_config, seed=config.seed),
+        train_sampler,
+    )
     eval_seed = None if config.seed is None else config.seed + 1
     eval_instances = build_fixed_instances(config.n_eval_episodes, seed=eval_seed)
     eval_env = build_env(
@@ -378,6 +396,24 @@ def parse_args() -> TrainConfig:
         help="Global random seed for training.",
     )
     parser.add_argument(
+        "--train-pool-size",
+        type=int,
+        default=128,
+        help="Number of fixed train-pool seeds sampled once at training start.",
+    )
+    parser.add_argument(
+        "--train-pool-seed",
+        type=int,
+        default=12345,
+        help="Seed used to create the fixed train-pool seed list.",
+    )
+    parser.add_argument(
+        "--fixed-pool-ratio",
+        type=float,
+        default=0.3,
+        help="Probability of taking the next training episode from the fixed train-pool instead of fresh generation.",
+    )
+    parser.add_argument(
         "--model-dir",
         type=Path,
         default=Path("output/models"),
@@ -429,6 +465,9 @@ def parse_args() -> TrainConfig:
         eval_freq=args.eval_freq,
         n_eval_episodes=args.eval_episodes,
         seed=args.seed,
+        train_pool_size=args.train_pool_size,
+        train_pool_seed=args.train_pool_seed,
+        fixed_pool_ratio=args.fixed_pool_ratio,
         model_dir=args.model_dir,
         best_model_dir=args.best_model_dir,
         tensorboard_dir=args.tensorboard_dir,

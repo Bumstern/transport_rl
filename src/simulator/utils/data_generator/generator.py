@@ -177,7 +177,7 @@ class InputDataGenerator:
             new_request['point_to_load']['name'] = self._choice(self._load_point_names)
             window_start, window_end = self._get_date_window(
                 time_gap_from_start_in_hours=int(self._rng.integers(0, self._max_simulator_duration_in_hours + 1)),
-                duration_in_hours=int(self._rng.integers(5, 13))
+                duration_in_hours=24
             )
             new_request['point_to_load']['date_start_window'] = str(window_start)
             new_request['point_to_load']['date_end_window'] = str(window_end)
