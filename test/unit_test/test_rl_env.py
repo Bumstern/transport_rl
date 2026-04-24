@@ -51,10 +51,14 @@ def test_simulator_run(simulator: Simulator, environment: Environment, requests_
 
 def _assert_observation_is_valid(rl_env: SimulatorEnv, observation: dict) -> None:
     assert rl_env.observation_space.contains(observation)
-    assert observation["travel_time_to_load"].shape == (GENERATOR_SETTINGS.max_truck_num,)
-    assert observation["travel_time_with_cargo_to_unload"].shape == (GENERATOR_SETTINGS.max_truck_num,)
-    assert observation["earliness_to_window_start"].shape == (GENERATOR_SETTINGS.max_truck_num,)
-    assert observation["lateness_to_window_start"].shape == (GENERATOR_SETTINGS.max_truck_num,)
+    expected_pairwise_shape = (
+        rl_env._observation_feature_config.pairwise_lookahead_requests,
+        GENERATOR_SETTINGS.max_truck_num,
+    )
+    assert observation["travel_time_to_load"].shape == expected_pairwise_shape
+    assert observation["travel_time_with_cargo_to_unload"].shape == expected_pairwise_shape
+    assert observation["earliness_to_window_start"].shape == expected_pairwise_shape
+    assert observation["lateness_to_window_start"].shape == expected_pairwise_shape
     assert np.all(observation["travel_time_to_load"] >= 0.0)
     assert np.all(observation["travel_time_to_load"] <= 1.0)
     assert np.all(observation["travel_time_with_cargo_to_unload"] >= 0.0)
@@ -126,8 +130,8 @@ def test_reward_uses_previous_observation_slack(rl_env: SimulatorEnv, monkeypatc
     truck_id = action - 1
 
     previous_observation = _copy_observation(observation)
-    previous_observation["earliness_to_window_start"][truck_id] = np.float32(0.0625)
-    previous_observation["lateness_to_window_start"][truck_id] = np.float32(0.0)
+    previous_observation["earliness_to_window_start"][0][truck_id] = np.float32(0.0625)
+    previous_observation["lateness_to_window_start"][0][truck_id] = np.float32(0.0)
     rl_env._current_observation = previous_observation
 
     truck_positions = [truck.position.current_point.model_copy(deep=True) for truck in rl_env._current_env.trucks]
@@ -143,8 +147,8 @@ def test_reward_uses_previous_observation_slack(rl_env: SimulatorEnv, monkeypatc
 
     def fake_create_observation(*args, **kwargs):
         next_observation = original_create_observation(*args, **kwargs)
-        next_observation["earliness_to_window_start"][truck_id] = np.float32(0.0)
-        next_observation["lateness_to_window_start"][truck_id] = np.float32(1.0)
+        next_observation["earliness_to_window_start"][0][truck_id] = np.float32(0.0)
+        next_observation["lateness_to_window_start"][0][truck_id] = np.float32(1.0)
         return next_observation
 
     monkeypatch.setattr(rl_env._obs_builder, "create_observation", fake_create_observation)
@@ -175,8 +179,8 @@ def test_reward_is_positive_for_successful_assignment(rl_env: SimulatorEnv, monk
     truck_id = action - 1
 
     previous_observation = _copy_observation(observation)
-    previous_observation["earliness_to_window_start"][truck_id] = np.float32(0.0)
-    previous_observation["lateness_to_window_start"][truck_id] = np.float32(0.0)
+    previous_observation["earliness_to_window_start"][0][truck_id] = np.float32(0.0)
+    previous_observation["lateness_to_window_start"][0][truck_id] = np.float32(0.0)
     rl_env._current_observation = previous_observation
 
     truck_positions = [truck.position.current_point.model_copy(deep=True) for truck in rl_env._current_env.trucks]
@@ -303,6 +307,34 @@ def test_fixed_instances_cycle_deterministically():
 
     assert first_signature != second_signature
     assert cycled_signature == first_signature
+
+
+def test_rl_env_supports_pairwise_lookahead():
+    generator = InputDataGenerator(
+        load_point_names=GENERATOR_SETTINGS.load_point_names,
+        unload_point_names=GENERATOR_SETTINGS.unload_point_names,
+        requests_num_min=GENERATOR_SETTINGS.min_requests_num,
+        requests_num_max=GENERATOR_SETTINGS.max_requests_num,
+        trucks_num=GENERATOR_SETTINGS.max_truck_num,
+        simulator_start_date=datetime.strptime(GENERATOR_SETTINGS.simulator_start_date, '%d.%m.%Y'),
+        simulator_end_date=datetime.strptime(GENERATOR_SETTINGS.simulator_end_date, '%d.%m.%Y'),
+        capacities_variants=GENERATOR_SETTINGS.capacities_variants,
+        min_distance=GENERATOR_SETTINGS.min_distance,
+        max_distance=GENERATOR_SETTINGS.max_distance,
+        seed=42,
+    )
+    feature_config = DEFAULT_OBSERVATION_FEATURES.model_copy(
+        update={"pairwise_lookahead_requests": 3}
+    )
+    env = SimulatorEnv(generator, feature_config)
+
+    observation, _ = env.reset(seed=42)
+
+    assert observation["travel_time_to_load"].shape == (3, GENERATOR_SETTINGS.max_truck_num)
+    assert observation["travel_time_with_cargo_to_unload"].shape == (3, GENERATOR_SETTINGS.max_truck_num)
+    assert observation["earliness_to_window_start"].shape == (3, GENERATOR_SETTINGS.max_truck_num)
+    assert observation["lateness_to_window_start"].shape == (3, GENERATOR_SETTINGS.max_truck_num)
+    assert env.observation_space.contains(observation)
 
 
 # # Запускает случайные действия, поэтому чтобы он не упал нужно запускать с _apply_restrictions_to_selection

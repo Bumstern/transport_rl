@@ -267,6 +267,12 @@ def parse_args() -> EvalConfig:
         default="all",
         help="Observation ablation preset.",
     )
+    parser.add_argument(
+        "--pairwise-lookahead-requests",
+        type=int,
+        default=1,
+        help="How many future requests to encode in pairwise truck-request features.",
+    )
     args = parser.parse_args()
     if args.policy == "model" and args.model_path is None:
         parser.error("--model-path is required when --policy model is used.")
@@ -278,7 +284,10 @@ def parse_args() -> EvalConfig:
         deterministic=not args.stochastic,
         seed=args.seed,
         output_path=args.output_path,
-        observation_feature_config=get_observation_feature_config(args.observation_preset),
+        observation_feature_config=get_observation_feature_config(
+            args.observation_preset,
+            pairwise_lookahead_requests=args.pairwise_lookahead_requests,
+        ),
     )
 
 

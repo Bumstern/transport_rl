@@ -35,6 +35,7 @@ class ObservationFeatureConfig(BaseModel):
     use_current_selection: bool = True
     use_next_request_tw: bool = True
     use_pairwise_features: bool = True
+    pairwise_lookahead_requests: int = 1
 
     model_config = ConfigDict(frozen=True)
 

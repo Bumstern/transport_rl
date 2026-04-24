@@ -6,6 +6,8 @@ from src.simulator.units.point import Point
 
 
 class ObservationBuilder:
+    _EMPTY_TRAVEL_TIME = GENERATOR_SETTINGS.max_requests_num
+
 
     def __init__(
             self,
@@ -68,6 +70,12 @@ class ObservationBuilder:
         }
 
     def _normalize_observation(self, observation: dict) -> None:
+        def _normalize_matrix(values: list[list[float]], mapper) -> list[list[float]]:
+            return [
+                [mapper(value) for value in row]
+                for row in values
+            ]
+
         for key in observation.keys():
             match key:
                 case "executed_requests":
@@ -83,13 +91,25 @@ class ObservationBuilder:
                 case "next_request_tw":
                     observation[key] = [observation[key][0] / self._env.end_date, observation[key][1] / self._env.end_date]
                 case "travel_time_to_load":
-                    observation[key] = [min(travel_time / self._env.end_date, 1.0) for travel_time in observation[key]]
+                    observation[key] = _normalize_matrix(
+                        observation[key],
+                        lambda travel_time: min(travel_time / self._env.end_date, 1.0)
+                    )
                 case "travel_time_with_cargo_to_unload":
-                    observation[key] = [min(travel_time / self._env.end_date, 1.0) for travel_time in observation[key]]
+                    observation[key] = _normalize_matrix(
+                        observation[key],
+                        lambda travel_time: min(travel_time / self._env.end_date, 1.0)
+                    )
                 case "earliness_to_window_start":
-                    observation[key] = [min(max(value / self._env.end_date, 0.0), 1.0) for value in observation[key]]
+                    observation[key] = _normalize_matrix(
+                        observation[key],
+                        lambda value: min(max(value / self._env.end_date, 0.0), 1.0)
+                    )
                 case "lateness_to_window_start":
-                    observation[key] = [min(max(value / self._env.end_date, 0.0), 1.0) for value in observation[key]]
+                    observation[key] = _normalize_matrix(
+                        observation[key],
+                        lambda value: min(max(value / self._env.end_date, 0.0), 1.0)
+                    )
                 case _:
                     raise NotImplementedError
 
@@ -127,15 +147,31 @@ class ObservationBuilder:
             return truck_positions
         return [truck.position.current_point.model_copy(deep=True) for truck in self._env.trucks]
 
-    def _get_travel_time_to_load(self, current_selection: list[int], truck_positions: list[Point] | None) -> list[int]:
+    def _build_empty_pairwise_row(
+            self,
+            *,
+            travel_time_value: int | None = None,
+            slack_value: int | None = None,
+    ) -> list[int]:
+        if travel_time_value is not None:
+            return [travel_time_value] * GENERATOR_SETTINGS.max_truck_num
+        if slack_value is not None:
+            return [slack_value] * GENERATOR_SETTINGS.max_truck_num
+        raise ValueError("Either travel_time_value or slack_value must be provided")
+
+    def _get_travel_time_to_load_for_request(
+            self,
+            request_id: int,
+            truck_positions: list[Point] | None,
+    ) -> list[int]:
         travel_time_to_load = [0] * GENERATOR_SETTINGS.max_truck_num
-        if len(current_selection) >= self._env.requests_num:
-            return travel_time_to_load
+        if request_id >= self._env.requests_num:
+            return self._build_empty_pairwise_row(travel_time_value=self._env.end_date)
 
         current_truck_positions = self._get_current_truck_positions(truck_positions)
-        next_request = self._env.requests[len(current_selection)]
+        next_request = self._env.requests[request_id]
         for truck_id in range(len(self._env.trucks)):
-            if truck_id not in self._req_constrains[len(current_selection)]:
+            if truck_id not in self._req_constrains[request_id]:
                 travel_time_to_load[truck_id] = self._env.end_date
                 continue
             travel_time_to_load[truck_id] = self._env.route_manager.calculate_travel_time_to_point(
@@ -149,18 +185,18 @@ class ObservationBuilder:
 
     def _get_time_slack_to_window_start(
             self,
-            current_selection: list[int],
+            request_id: int,
             travel_time_to_load: list[int],
             truck_available_times: list[int] | None
     ) -> list[int]:
         time_slack_to_window_start = [0] * GENERATOR_SETTINGS.max_truck_num
-        if len(current_selection) >= self._env.requests_num:
-            return time_slack_to_window_start
+        if request_id >= self._env.requests_num:
+            return self._build_empty_pairwise_row(slack_value=-self._env.end_date)
 
-        next_request = self._env.requests[len(current_selection)]
+        next_request = self._env.requests[request_id]
         current_truck_available_times = truck_available_times or [0] * len(self._env.trucks)
         for truck_id in range(len(self._env.trucks)):
-            if truck_id not in self._req_constrains[len(current_selection)]:
+            if truck_id not in self._req_constrains[request_id]:
                 time_slack_to_window_start[truck_id] = -self._env.end_date
                 continue
             time_slack_to_window_start[truck_id] = (
@@ -169,14 +205,14 @@ class ObservationBuilder:
             )
         return time_slack_to_window_start
 
-    def _get_travel_time_with_cargo_to_unload(self, current_selection: list[int]) -> list[int]:
+    def _get_travel_time_with_cargo_to_unload_for_request(self, request_id: int) -> list[int]:
         travel_time_with_cargo_to_unload = [0] * GENERATOR_SETTINGS.max_truck_num
-        if len(current_selection) >= self._env.requests_num:
-            return travel_time_with_cargo_to_unload
+        if request_id >= self._env.requests_num:
+            return self._build_empty_pairwise_row(travel_time_value=self._env.end_date)
 
-        next_request = self._env.requests[len(current_selection)]
+        next_request = self._env.requests[request_id]
         for truck_id in range(len(self._env.trucks)):
-            if truck_id not in self._req_constrains[len(current_selection)]:
+            if truck_id not in self._req_constrains[request_id]:
                 travel_time_with_cargo_to_unload[truck_id] = self._env.end_date
                 continue
             travel_time_with_cargo_to_unload[truck_id] = self._env.route_manager.calculate_travel_time_to_point(
@@ -193,6 +229,48 @@ class ObservationBuilder:
         earliness_to_window_start = [max(slack, 0) for slack in time_slack_to_window_start]
         lateness_to_window_start = [max(-slack, 0) for slack in time_slack_to_window_start]
         return earliness_to_window_start, lateness_to_window_start
+
+    def _get_pairwise_feature_matrices(
+            self,
+            current_selection: list[int],
+            truck_positions: list[Point] | None,
+            truck_available_times: list[int] | None,
+    ) -> tuple[list[list[int]], list[list[int]], list[list[int]], list[list[int]]]:
+        travel_time_to_load = []
+        travel_time_with_cargo_to_unload = []
+        earliness_to_window_start = []
+        lateness_to_window_start = []
+
+        current_request_id = len(current_selection)
+        for lookahead_offset in range(self._feature_config.pairwise_lookahead_requests):
+            request_id = current_request_id + lookahead_offset
+            current_travel_time_to_load = self._get_travel_time_to_load_for_request(
+                request_id=request_id,
+                truck_positions=truck_positions,
+            )
+            current_travel_time_with_cargo_to_unload = self._get_travel_time_with_cargo_to_unload_for_request(
+                request_id=request_id
+            )
+            current_time_slack_to_window_start = self._get_time_slack_to_window_start(
+                request_id=request_id,
+                travel_time_to_load=current_travel_time_to_load,
+                truck_available_times=truck_available_times,
+            )
+            current_earliness_to_window_start, current_lateness_to_window_start = (
+                self._split_slack_to_earliness_and_lateness(current_time_slack_to_window_start)
+            )
+
+            travel_time_to_load.append(current_travel_time_to_load)
+            travel_time_with_cargo_to_unload.append(current_travel_time_with_cargo_to_unload)
+            earliness_to_window_start.append(current_earliness_to_window_start)
+            lateness_to_window_start.append(current_lateness_to_window_start)
+
+        return (
+            travel_time_to_load,
+            travel_time_with_cargo_to_unload,
+            earliness_to_window_start,
+            lateness_to_window_start,
+        )
 
     def create_observation(
             self,
@@ -221,15 +299,15 @@ class ObservationBuilder:
             next_request_tw = [next_request.point_to_load.date_start_window, next_request.point_to_load.date_end_window]
         else:
             next_request_tw = [0, 0]
-        travel_time_to_load = self._get_travel_time_to_load(current_selection, truck_positions)
-        travel_time_with_cargo_to_unload = self._get_travel_time_with_cargo_to_unload(current_selection)
-        time_slack_to_window_start = self._get_time_slack_to_window_start(
-            current_selection,
+        (
             travel_time_to_load,
-            truck_available_times
-        )
-        earliness_to_window_start, lateness_to_window_start = self._split_slack_to_earliness_and_lateness(
-            time_slack_to_window_start
+            travel_time_with_cargo_to_unload,
+            earliness_to_window_start,
+            lateness_to_window_start,
+        ) = self._get_pairwise_feature_matrices(
+            current_selection=current_selection,
+            truck_positions=truck_positions,
+            truck_available_times=truck_available_times,
         )
         observation = {}
         if self._feature_config.use_executed_requests:

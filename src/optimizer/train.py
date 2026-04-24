@@ -1,4 +1,6 @@
 import argparse
+import hashlib
+import json
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -27,6 +29,7 @@ OBSERVATION_PRESETS = (
     "no_current_selection",
     "no_unfinished_ratio",
     "no_current_selection_no_unfinished_ratio",
+    "no_current_selection_no_unfinished_ratio_no_time_windows",
     "no_executed_requests",
     "pairwise_only",
 )
@@ -45,6 +48,7 @@ class TrainConfig:
     eval_freq: int
     n_eval_episodes: int
     seed: int | None
+    resume_from: Path | None
     train_pool_size: int
     train_pool_seed: int | None
     fixed_pool_ratio: float
@@ -217,7 +221,13 @@ def build_generator(seed: int | None = None) -> InputDataGenerator:
     )
 
 
-def get_observation_feature_config(preset: str) -> ObservationFeatureConfig:
+def get_observation_feature_config(
+    preset: str,
+    pairwise_lookahead_requests: int = 1,
+) -> ObservationFeatureConfig:
+    if pairwise_lookahead_requests <= 0:
+        raise ValueError("pairwise_lookahead_requests must be positive")
+
     presets = {
         "all": DEFAULT_OBSERVATION_FEATURES,
         "no_current_selection": DEFAULT_OBSERVATION_FEATURES.model_copy(update={"use_current_selection": False}),
@@ -226,6 +236,13 @@ def get_observation_feature_config(preset: str) -> ObservationFeatureConfig:
             update={
                 "use_current_selection": False,
                 "use_unfinished_ratio": False,
+            }
+        ),
+        "no_current_selection_no_unfinished_ratio_no_time_windows": DEFAULT_OBSERVATION_FEATURES.model_copy(
+            update={
+                "use_current_selection": False,
+                "use_unfinished_ratio": False,
+                "use_time_windows": False,
             }
         ),
         "no_executed_requests": DEFAULT_OBSERVATION_FEATURES.model_copy(update={"use_executed_requests": False}),
@@ -239,7 +256,9 @@ def get_observation_feature_config(preset: str) -> ObservationFeatureConfig:
             }
         ),
     }
-    return presets[preset]
+    return presets[preset].model_copy(
+        update={"pairwise_lookahead_requests": pairwise_lookahead_requests}
+    )
 
 
 def build_fixed_instances(count: int, seed: int | None) -> list[tuple[dict, list[dict]]]:
@@ -267,6 +286,65 @@ def ensure_output_dirs(config: TrainConfig) -> None:
     config.tensorboard_dir.mkdir(parents=True, exist_ok=True)
 
 
+def _hash_file(file_path: Path) -> str:
+    digest = hashlib.sha256()
+    with file_path.open("rb") as f:
+        while True:
+            chunk = f.read(8192)
+            if not chunk:
+                break
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def serialize_train_config(config: TrainConfig) -> dict:
+    return {
+        "total_timesteps": config.total_timesteps,
+        "n_steps": config.n_steps,
+        "clip_range": config.clip_range,
+        "learning_rate": config.learning_rate,
+        "learning_rate_schedule": config.learning_rate_schedule,
+        "learning_rate_step_points": list(config.learning_rate_step_points),
+        "learning_rate_step_values": list(config.learning_rate_step_values),
+        "net_arch": list(config.net_arch),
+        "eval_freq": config.eval_freq,
+        "n_eval_episodes": config.n_eval_episodes,
+        "seed": config.seed,
+        "resume_from": str(config.resume_from) if config.resume_from is not None else None,
+        "train_pool_size": config.train_pool_size,
+        "train_pool_seed": config.train_pool_seed,
+        "fixed_pool_ratio": config.fixed_pool_ratio,
+        "model_dir": str(config.model_dir),
+        "best_model_dir": str(config.best_model_dir),
+        "tensorboard_dir": str(config.tensorboard_dir),
+        "verbose": config.verbose,
+        "observation_feature_config": config.observation_feature_config.model_dump(),
+        "early_stop_patience_episodes": config.early_stop_patience_episodes,
+    }
+
+
+def build_training_metadata(config: TrainConfig) -> dict:
+    routes_path = Path("input/routes.json")
+    generator_settings_path = Path("input/generator_settings.json")
+    return {
+        "saved_at": datetime.now().isoformat(timespec="seconds"),
+        "config": serialize_train_config(config),
+        "generator_settings": json.loads(generator_settings_path.read_text()),
+        "routes": {
+            "path": str(routes_path),
+            "sha256": _hash_file(routes_path),
+        },
+    }
+
+
+def save_training_metadata(model_path: Path, config: TrainConfig) -> Path:
+    metadata_path = model_path.with_suffix(".config.json")
+    metadata_path.write_text(
+        json.dumps(build_training_metadata(config), ensure_ascii=False, indent=2)
+    )
+    return metadata_path
+
+
 def build_model(config: TrainConfig, env: SimulatorEnv) -> MaskablePPO:
     return MaskablePPO(
         "MultiInputPolicy",
@@ -281,6 +359,15 @@ def build_model(config: TrainConfig, env: SimulatorEnv) -> MaskablePPO:
             "net_arch": config.net_arch,
         },
     )
+
+
+def load_or_build_model(config: TrainConfig, env: SimulatorEnv) -> MaskablePPO:
+    if config.resume_from is None:
+        return build_model(config, env)
+
+    model = MaskablePPO.load(str(config.resume_from))
+    model.set_env(env)
+    return model
 
 
 def train(config: TrainConfig) -> Path:
@@ -304,7 +391,7 @@ def train(config: TrainConfig) -> Path:
         seed=eval_seed,
         fixed_instances=eval_instances,
     )
-    model = build_model(config, train_env)
+    model = load_or_build_model(config, train_env)
 
     eval_callback = MetricsEvalCallback(
         eval_env,
@@ -325,11 +412,13 @@ def train(config: TrainConfig) -> Path:
         total_timesteps=config.total_timesteps,
         progress_bar=True,
         callback=[eval_callback, episode_logger_callback, early_stopping_callback],
+        reset_num_timesteps=config.resume_from is None,
     )
 
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     model_path = config.model_dir / f"{timestamp}.zip"
     model.save(str(model_path))
+    save_training_metadata(model_path, config)
     return model_path
 
 
@@ -396,6 +485,12 @@ def parse_args() -> TrainConfig:
         help="Global random seed for training.",
     )
     parser.add_argument(
+        "--resume-from",
+        type=Path,
+        default=None,
+        help="Optional path to an existing model checkpoint to continue training from.",
+    )
+    parser.add_argument(
         "--train-pool-size",
         type=int,
         default=128,
@@ -444,6 +539,12 @@ def parse_args() -> TrainConfig:
         help="Observation ablation preset.",
     )
     parser.add_argument(
+        "--pairwise-lookahead-requests",
+        type=int,
+        default=1,
+        help="How many future requests to encode in pairwise truck-request features.",
+    )
+    parser.add_argument(
         "--early-stop-patience-episodes",
         "--early-stop-patience-epochs",
         type=int,
@@ -465,6 +566,7 @@ def parse_args() -> TrainConfig:
         eval_freq=args.eval_freq,
         n_eval_episodes=args.eval_episodes,
         seed=args.seed,
+        resume_from=args.resume_from,
         train_pool_size=args.train_pool_size,
         train_pool_seed=args.train_pool_seed,
         fixed_pool_ratio=args.fixed_pool_ratio,
@@ -472,7 +574,10 @@ def parse_args() -> TrainConfig:
         best_model_dir=args.best_model_dir,
         tensorboard_dir=args.tensorboard_dir,
         verbose=args.verbose,
-        observation_feature_config=get_observation_feature_config(args.observation_preset),
+        observation_feature_config=get_observation_feature_config(
+            args.observation_preset,
+            pairwise_lookahead_requests=args.pairwise_lookahead_requests,
+        ),
         early_stop_patience_episodes=args.early_stop_patience_episodes,
     )
 

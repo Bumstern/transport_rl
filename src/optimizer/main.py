@@ -47,6 +47,10 @@ class SimulatorEnv(gymnasium.Env):
     @staticmethod
     def _build_observation_space(feature_config: ObservationFeatureConfig) -> dict:
         observation_space = {}
+        pairwise_shape = (
+            feature_config.pairwise_lookahead_requests,
+            GENERATOR_SETTINGS.max_truck_num,
+        )
         if feature_config.use_time_windows:
             observation_space["time_windows"] = spaces.Box(
                 0.0, 1.0, shape=(GENERATOR_SETTINGS.max_requests_num, 2), dtype=np.float32
@@ -66,16 +70,16 @@ class SimulatorEnv(gymnasium.Env):
             observation_space["next_request_tw"] = spaces.Box(0.0, 1.0, shape=(2,), dtype=np.float32)
         if feature_config.use_pairwise_features:
             observation_space["travel_time_to_load"] = spaces.Box(
-                0.0, 1.0, shape=(GENERATOR_SETTINGS.max_truck_num,), dtype=np.float32
+                0.0, 1.0, shape=pairwise_shape, dtype=np.float32
             )
             observation_space["travel_time_with_cargo_to_unload"] = spaces.Box(
-                0.0, 1.0, shape=(GENERATOR_SETTINGS.max_truck_num,), dtype=np.float32
+                0.0, 1.0, shape=pairwise_shape, dtype=np.float32
             )
             observation_space["earliness_to_window_start"] = spaces.Box(
-                0.0, 1.0, shape=(GENERATOR_SETTINGS.max_truck_num,), dtype=np.float32
+                0.0, 1.0, shape=pairwise_shape, dtype=np.float32
             )
             observation_space["lateness_to_window_start"] = spaces.Box(
-                0.0, 1.0, shape=(GENERATOR_SETTINGS.max_truck_num,), dtype=np.float32
+                0.0, 1.0, shape=pairwise_shape, dtype=np.float32
             )
         return observation_space
 
@@ -155,8 +159,8 @@ class SimulatorEnv(gymnasium.Env):
             return 0.0
 
         chosen_slack = (
-            float(observation_before_action["earliness_to_window_start"][truck_id])
-            - float(observation_before_action["lateness_to_window_start"][truck_id])
+            float(observation_before_action["earliness_to_window_start"][0][truck_id])
+            - float(observation_before_action["lateness_to_window_start"][0][truck_id])
         )
         return self._slack_penalty(chosen_slack)
 

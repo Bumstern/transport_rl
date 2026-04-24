@@ -1,6 +1,7 @@
 import numpy as np
 
-from src.optimizer.settings import GENERATOR_SETTINGS
+from src.optimizer.settings import GENERATOR_SETTINGS, DEFAULT_OBSERVATION_FEATURES
+from src.optimizer.utils.observation_builder import ObservationBuilder
 from src.simulator.units.point import Point
 
 
@@ -11,10 +12,10 @@ def test_create_observation_contains_pairwise_features(obs_builder, environment,
     assert "travel_time_with_cargo_to_unload" in observation
     assert "earliness_to_window_start" in observation
     assert "lateness_to_window_start" in observation
-    assert observation["travel_time_to_load"].shape == (GENERATOR_SETTINGS.max_truck_num,)
-    assert observation["travel_time_with_cargo_to_unload"].shape == (GENERATOR_SETTINGS.max_truck_num,)
-    assert observation["earliness_to_window_start"].shape == (GENERATOR_SETTINGS.max_truck_num,)
-    assert observation["lateness_to_window_start"].shape == (GENERATOR_SETTINGS.max_truck_num,)
+    assert observation["travel_time_to_load"].shape == (1, GENERATOR_SETTINGS.max_truck_num)
+    assert observation["travel_time_with_cargo_to_unload"].shape == (1, GENERATOR_SETTINGS.max_truck_num)
+    assert observation["earliness_to_window_start"].shape == (1, GENERATOR_SETTINGS.max_truck_num)
+    assert observation["lateness_to_window_start"].shape == (1, GENERATOR_SETTINGS.max_truck_num)
     assert observation["travel_time_to_load"].dtype == np.float32
     assert observation["travel_time_with_cargo_to_unload"].dtype == np.float32
     assert observation["earliness_to_window_start"].dtype == np.float32
@@ -41,10 +42,10 @@ def test_forbidden_trucks_have_extreme_pairwise_values(obs_builder, environment,
     observation = obs_builder.create_observation([], current_selection)
 
     for truck_id in forbidden_truck_ids:
-        assert observation["travel_time_to_load"][truck_id] == np.float32(1.0)
-        assert observation["travel_time_with_cargo_to_unload"][truck_id] == np.float32(1.0)
-        assert observation["earliness_to_window_start"][truck_id] == np.float32(0.0)
-        assert observation["lateness_to_window_start"][truck_id] == np.float32(1.0)
+        assert observation["travel_time_to_load"][0][truck_id] == np.float32(1.0)
+        assert observation["travel_time_with_cargo_to_unload"][0][truck_id] == np.float32(1.0)
+        assert observation["earliness_to_window_start"][0][truck_id] == np.float32(0.0)
+        assert observation["lateness_to_window_start"][0][truck_id] == np.float32(1.0)
 
 
 def test_truck_available_time_shifts_from_earliness_to_lateness(obs_builder, requests_constraints):
@@ -75,17 +76,17 @@ def test_truck_available_time_shifts_from_earliness_to_lateness(obs_builder, req
     expected_earliness_without_delay = (
         next_request.point_to_load.date_start_window / obs_builder._env.end_date
     )
-    assert observation_without_delay["travel_time_to_load"][allowed_truck_id] == np.float32(0.0)
-    assert observation_without_delay["earliness_to_window_start"][allowed_truck_id] == np.float32(
+    assert observation_without_delay["travel_time_to_load"][0][allowed_truck_id] == np.float32(0.0)
+    assert observation_without_delay["earliness_to_window_start"][0][allowed_truck_id] == np.float32(
         expected_earliness_without_delay
     )
-    assert observation_without_delay["lateness_to_window_start"][allowed_truck_id] == np.float32(0.0)
-    assert observation_with_delay["travel_time_to_load"][allowed_truck_id] == np.float32(0.0)
+    assert observation_without_delay["lateness_to_window_start"][0][allowed_truck_id] == np.float32(0.0)
+    assert observation_with_delay["travel_time_to_load"][0][allowed_truck_id] == np.float32(0.0)
     expected_signed_slack_with_delay = max(expected_earliness_without_delay - 1.0, -1.0)
-    assert observation_with_delay["earliness_to_window_start"][allowed_truck_id] == np.float32(
+    assert observation_with_delay["earliness_to_window_start"][0][allowed_truck_id] == np.float32(
         max(expected_signed_slack_with_delay, 0.0)
     )
-    assert observation_with_delay["lateness_to_window_start"][allowed_truck_id] == np.float32(
+    assert observation_with_delay["lateness_to_window_start"][0][allowed_truck_id] == np.float32(
         max(-expected_signed_slack_with_delay, 0.0)
     )
     assert np.all(
@@ -120,15 +121,15 @@ def test_truck_position_affects_travel_time_to_load(obs_builder, requests_constr
         truck_available_times=[0] * len(obs_builder._env.trucks)
     )
 
-    assert observation_near["travel_time_to_load"][allowed_truck_id] == np.float32(0.0)
+    assert observation_near["travel_time_to_load"][0][allowed_truck_id] == np.float32(0.0)
     expected_earliness = (
         next_request.point_to_load.date_start_window / obs_builder._env.end_date
     )
-    assert observation_near["earliness_to_window_start"][allowed_truck_id] == np.float32(expected_earliness)
-    assert observation_near["lateness_to_window_start"][allowed_truck_id] == np.float32(0.0)
+    assert observation_near["earliness_to_window_start"][0][allowed_truck_id] == np.float32(expected_earliness)
+    assert observation_near["lateness_to_window_start"][0][allowed_truck_id] == np.float32(0.0)
     assert (
-        observation_near["travel_time_to_load"][allowed_truck_id]
-        <= observation_far["travel_time_to_load"][allowed_truck_id]
+        observation_near["travel_time_to_load"][0][allowed_truck_id]
+        <= observation_far["travel_time_to_load"][0][allowed_truck_id]
     )
 
 
@@ -152,6 +153,71 @@ def test_request_route_affects_travel_time_with_cargo_to_unload(obs_builder, req
     )
     expected_normalized_travel_time = min(expected_travel_time / obs_builder._env.end_date, 1.0)
 
-    assert observation["travel_time_with_cargo_to_unload"][allowed_truck_id] == np.float32(
+    assert observation["travel_time_with_cargo_to_unload"][0][allowed_truck_id] == np.float32(
         expected_normalized_travel_time
     )
+
+
+def test_pairwise_lookahead_pads_missing_future_requests(environment, requests_constraints):
+    feature_config = DEFAULT_OBSERVATION_FEATURES.model_copy(
+        update={"pairwise_lookahead_requests": 3}
+    )
+    lookahead_builder = ObservationBuilder(environment, requests_constraints, feature_config)
+    current_selection = [-1] * (environment.requests_num - 1)
+
+    observation = lookahead_builder.create_observation([], current_selection)
+
+    assert observation["travel_time_to_load"].shape == (3, GENERATOR_SETTINGS.max_truck_num)
+    assert np.all(observation["travel_time_to_load"][1:] == np.float32(1.0))
+    assert np.all(observation["travel_time_with_cargo_to_unload"][1:] == np.float32(1.0))
+    assert np.all(observation["earliness_to_window_start"][1:] == np.float32(0.0))
+    assert np.all(observation["lateness_to_window_start"][1:] == np.float32(1.0))
+
+
+def test_pairwise_lookahead_uses_real_future_request_values(environment, requests_constraints):
+    feature_config = DEFAULT_OBSERVATION_FEATURES.model_copy(
+        update={"pairwise_lookahead_requests": 3}
+    )
+    lookahead_builder = ObservationBuilder(environment, requests_constraints, feature_config)
+    current_selection = []
+
+    observation = lookahead_builder.create_observation([], current_selection)
+
+    for lookahead_offset in range(3):
+        request_id = lookahead_offset
+        request = environment.requests[request_id]
+        allowed_truck_id = next(
+            truck_id for truck_id in requests_constraints[request_id]
+            if truck_id != -1
+        )
+
+        expected_travel_time_to_load = environment.route_manager.calculate_travel_time_to_point(
+            truck=environment.trucks[allowed_truck_id],
+            with_cargo=False,
+            request=request,
+            departure_point=environment.trucks[allowed_truck_id].position.current_point,
+            destination_point=request.point_to_load,
+        )
+        expected_travel_time_with_cargo_to_unload = environment.route_manager.calculate_travel_time_to_point(
+            truck=environment.trucks[allowed_truck_id],
+            with_cargo=True,
+            request=request,
+            departure_point=request.point_to_load,
+            destination_point=request.point_to_unload,
+        )
+        expected_signed_slack = request.point_to_load.date_start_window - expected_travel_time_to_load
+
+        assert observation["travel_time_to_load"][lookahead_offset][allowed_truck_id] == np.float32(
+            min(expected_travel_time_to_load / environment.end_date, 1.0)
+        )
+        assert observation["travel_time_with_cargo_to_unload"][lookahead_offset][allowed_truck_id] == np.float32(
+            min(expected_travel_time_with_cargo_to_unload / environment.end_date, 1.0)
+        )
+        assert observation["earliness_to_window_start"][lookahead_offset][allowed_truck_id] == np.float32(
+            min(max(expected_signed_slack / environment.end_date, 0.0), 1.0)
+        )
+        assert observation["lateness_to_window_start"][lookahead_offset][allowed_truck_id] == np.float32(
+            min(max(-expected_signed_slack / environment.end_date, 0.0), 1.0)
+        )
+
+        assert observation["travel_time_to_load"][lookahead_offset][allowed_truck_id] != np.float32(1.0)
