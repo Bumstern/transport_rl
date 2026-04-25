@@ -7,7 +7,7 @@ load_dotenv()
 
 
 class EnvSettings(BaseSettings):
-    max_num_of_steps: int = Field(alias='MAX_NUM_OF_STEPS', default=50)
+    # max_num_of_steps: int = Field(alias='MAX_NUM_OF_STEPS', default=50)
     epochs_num: int = Field(alias='EPOCHS_NUM', default=10)
 
     model_config = ConfigDict(frozen=True)
@@ -15,6 +15,7 @@ class EnvSettings(BaseSettings):
 
 class GeneratorSettings(BaseModel):
     max_truck_num: int
+    min_requests_num: int
     max_requests_num: int
     simulator_start_date: str
     simulator_end_date: str
@@ -27,6 +28,18 @@ class GeneratorSettings(BaseModel):
     model_config = ConfigDict(frozen=True)
 
 
+class ObservationFeatureConfig(BaseModel):
+    use_time_windows: bool = True
+    use_executed_requests: bool = True
+    use_unfinished_ratio: bool = True
+    use_current_selection: bool = True
+    use_next_request_tw: bool = True
+    use_pairwise_features: bool = True
+    pairwise_lookahead_requests: int = 1
+
+    model_config = ConfigDict(frozen=True)
+
+
 ENV_SETTINGS = EnvSettings()
 
 with open('input/generator_settings.json', 'r') as f:
@@ -34,3 +47,5 @@ with open('input/generator_settings.json', 'r') as f:
 
 GENERATOR_SETTINGS = GeneratorSettings(**__raw_gen_data)
 del __raw_gen_data
+
+DEFAULT_OBSERVATION_FEATURES = ObservationFeatureConfig()

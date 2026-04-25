@@ -1,18 +1,15 @@
 import math
-import copy
 
-from pydantic.v1.generics import replace_types
-
-from simulator.environment import Environment
-from simulator.managers.task_manager import TaskManager
-from simulator.units.point import LoadPoint, Point
-from simulator.units.request import Request
-from simulator.units.truck import Truck, Position
+from src.simulator.environment import Environment
+from src.simulator.managers.task_manager import TaskManager
+from src.simulator.units.point import Point
+from src.simulator.units.request import Request
+from src.simulator.units.truck import Truck, Position
 
 
 class Simulator:
-    def __init__(self):
-        self._env = None
+    def __init__(self, env: Environment = None):
+        self._env = env
 
     def _request_simulation(
             self,
@@ -154,8 +151,10 @@ class Simulator:
             copied_trucks.append(copied_truck)
         return copied_trucks
 
-    def run(self, selection: tuple[int], env: Environment) -> list[int]:
-        self._env = env
+    def run(self, selection: tuple[int], env: Environment = None) -> tuple[list[int], list[Point], list[int]]:
+        if env is not None:
+            self._env = env
+        assert self._env is not None, "Не передано env"
 
         # Присваиваем каждой машине список своих заказов с помощью TaskManager
         task_manager = TaskManager(selection, self._env)
@@ -170,6 +169,7 @@ class Simulator:
                 missed_requests_ids.append(request_id)
 
         # В цикле по каждой машине
+        truck_available_times = [0] * len(trucks)
         for truck in trucks:
             truck: Truck
             current_time = 0
@@ -198,4 +198,8 @@ class Simulator:
                         missed_requests_ids=missed_requests_ids
                     )
 
-        return missed_requests_ids
+            truck_available_times[truck.id] = current_time
+
+        truck_positions = [truck.position.current_point.model_copy(deep=True) for truck in trucks]
+
+        return missed_requests_ids, truck_positions, truck_available_times

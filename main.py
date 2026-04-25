@@ -3,17 +3,18 @@ import random
 from datetime import datetime
 
 import numpy as np
+from sb3_contrib import MaskablePPO
 from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import BaseCallback, EvalCallback
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 
-from optimizer.main import SimulatorEnv
-from simulator.builder import get_env, get_requests_constrains
-from simulator.environment import Environment
-from simulator.model.simulator import Simulator
-from simulator.utils.data_generator.generator import InputDataGenerator
-from optimizer.settings import ENV_SETTINGS, GENERATOR_SETTINGS
+from src.optimizer.main import SimulatorEnv
+from src.simulator.builder import get_env, get_requests_constrains
+from src.simulator.environment import Environment
+from src.simulator.model.simulator import Simulator
+from src.simulator.utils.data_generator.generator import InputDataGenerator
+from src.optimizer.settings import GENERATOR_SETTINGS
 
 
 class InfoLoggerCallback(BaseCallback):
@@ -80,9 +81,9 @@ def model_eval(model_path, env, n_episodes=10):
     model = PPO(
         "MultiInputPolicy",
         env,
-        n_steps=1024,
-        verbose=1,
-        tensorboard_log="output/logs/tensorboard"
+        # n_steps=256,
+        # verbose=1,
+        # tensorboard_log="output/logs/tensorboard"
     ).load(model_path)
 
     metrics = {
@@ -91,30 +92,28 @@ def model_eval(model_path, env, n_episodes=10):
         "unfinished_ratio": []
     }
     for episode in tqdm(range(n_episodes)):
-        obs, info = env.reset()
-        done = False
-        episode_reward = 0
-        infos = []
-
-        while not done:
+        obs, _ = env.reset()
+        terminated = False
+        cum_reward = 0
+        last_missed_req_num = 0
+        last_unfinished_ratio = 0
+        while terminated == False:
             action, _ = model.predict(obs, deterministic=True)
             obs, reward, terminated, truncated, info = env.step(action)
-            done = terminated or truncated
-            episode_reward += reward
-            infos.append(info)
+            cum_reward += reward
+            last_missed_req_num = info["missed_requests_num"]
+            last_unfinished_ratio = info["unfinished_ratio"]
 
-        metrics["reward"].append(episode_reward / n_episodes)
-        metrics["missed_requests_num"].append( np.mean([elem["missed_requests_num"] for elem in infos]) )
-        metrics["unfinished_ratio"].append( np.mean([elem["unfinished_ratio"] for elem in infos]) )
+        metrics["reward"].append(cum_reward)
+        metrics["missed_requests_num"].append(last_missed_req_num)
+        metrics["unfinished_ratio"].append(last_unfinished_ratio)
         # print(f"{episode}: reward: {metrics['reward']}, missed_requests_num: {metrics['missed_requests_num']},"
         #       f" unfinished_ratio: {metrics['unfinished_ratio']}")
 
-    # Средняя метрика
-    avg_completed = np.mean(metrics["missed_requests_num"])
-    print(f"Среднее невыполненных заявок: {avg_completed:.2f}")
+    avg_missed = np.mean(metrics["missed_requests_num"])
+    print(f"Среднее кол-во невыполненных заявок: {avg_missed:.2f}")
 
     fig, axs = plt.subplots(nrows=1, ncols=3, figsize=(15, 5))
-
     for ax, key in zip(axs, metrics.keys()):
         x = list(range(len(metrics[key])))
         ax.plot(x, metrics[key], linestyle='-', marker='o')
@@ -135,7 +134,8 @@ def main():
     generator = InputDataGenerator(
         load_point_names=GENERATOR_SETTINGS.load_point_names,
         unload_point_names=GENERATOR_SETTINGS.unload_point_names,
-        requests_num=GENERATOR_SETTINGS.max_requests_num,
+        requests_num_min=GENERATOR_SETTINGS.min_requests_num,
+        requests_num_max=GENERATOR_SETTINGS.max_requests_num,
         trucks_num=GENERATOR_SETTINGS.max_truck_num,
         simulator_start_date=datetime.strptime(GENERATOR_SETTINGS.simulator_start_date, '%d.%m.%Y'),
         simulator_end_date=datetime.strptime(GENERATOR_SETTINGS.simulator_end_date, '%d.%m.%Y'),
@@ -145,7 +145,19 @@ def main():
     )
     env = SimulatorEnv(generator)
 
-    print(model_eval("output/models/best/best_model_600k.zip", env, 25))
+    # print(model_eval("output/models/best/best_model.zip", env, 25))
+
+    model = MaskablePPO(
+        "MultiInputPolicy",
+        env,
+        n_steps=256,
+        clip_range=0.6,
+        verbose=1,
+        tensorboard_log="output/logs/tensorboard",
+        policy_kwargs={
+            "net_arch": [128] * 5
+        }
+    )
 
     # model = PPO(
     #     "MultiInputPolicy",
@@ -166,7 +178,7 @@ def main():
     # info_logger_callback = InfoLoggerCallback()
     #
     # model.learn(
-    #     total_timesteps=ENV_SETTINGS.max_num_of_steps * ENV_SETTINGS.epochs_num,
+    #     total_timesteps=1024 * GENERATOR_SETTINGS.max_requests_num,
     #     progress_bar=True,
     #     callback=[eval_callback, info_logger_callback]
     # )

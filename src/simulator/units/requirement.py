@@ -1,6 +1,6 @@
-from simulator.units.entities import Entities
-from simulator.units.request import Request
-from simulator.units.truck import Truck
+from src.simulator.units.entities import Entities
+from src.simulator.units.request import Request
+from src.simulator.units.truck import Truck
 
 
 def apply_requirements(requests: Entities, trucks: Entities, with_missed: bool):
