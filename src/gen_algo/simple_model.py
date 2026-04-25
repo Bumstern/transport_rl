@@ -88,7 +88,7 @@ class GeneticAlgoSimple(GeneticAlgoBase):
             best_fitness = max(fitnesses)
             best_individual = population[fitnesses.index(best_fitness)]
 
-            print(f"Поколение {iter + 1}: Лучшая приспособленность = {best_fitness}")
+            # print(f"{self.__class__.__name__}: Поколение {iter + 1}: Лучшая приспособленность = {best_fitness}")
 
             # 2. Селекция (отбор родителей)
             parents = self._selection(population, fitnesses)

@@ -1,10 +1,11 @@
 import random
 
+from src.gen_algo.simple_model import GeneticAlgoSimple
 from src.gen_algo.base import Genome
 from src.gen_algo.model_rl_init import GeneticAlgoWithRLInit
 
 
-class GeneticAlgoWithInitAndRlMutator(GeneticAlgoWithRLInit):
+class _RlMutatorMixin:
 
     def _mutation(self, individual: Genome) -> Genome:
         individual = individual.copy()
@@ -18,3 +19,13 @@ class GeneticAlgoWithInitAndRlMutator(GeneticAlgoWithRLInit):
                 action, _ = self._rl_model.predict(obs, action_masks=mask, deterministic=True)
                 individual[i] = self._action_to_truck_id(action)
         return individual
+
+
+class GeneticAlgoWithRlMutator(_RlMutatorMixin, GeneticAlgoWithRLInit):
+
+    def _create_initial_population(self) -> list[Genome]:
+        return GeneticAlgoSimple._create_initial_population(self)
+
+
+class GeneticAlgoWithInitAndRlMutator(_RlMutatorMixin, GeneticAlgoWithRLInit):
+    pass
