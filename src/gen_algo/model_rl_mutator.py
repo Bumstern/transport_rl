@@ -56,3 +56,7 @@ class GeneticAlgoWithRlTailMutator(_RlTailMutatorMixin, GeneticAlgoWithRLInit):
 
 class GeneticAlgoWithInitAndRlMutator(_RlMutatorMixin, GeneticAlgoWithRLInit):
     pass
+
+
+class GeneticAlgoWithInitAndRlTailMutator(_RlTailMutatorMixin, GeneticAlgoWithRLInit):
+    pass
