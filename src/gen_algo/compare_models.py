@@ -12,6 +12,7 @@ import numpy as np
 
 from src.gen_algo.model_rl_init import GeneticAlgoWithRLInit
 from src.gen_algo.model_rl_mutator import GeneticAlgoWithRlMutator
+from src.gen_algo.model_rl_mutator import GeneticAlgoWithRlTailMutator
 from src.gen_algo.model_rl_mutator import GeneticAlgoWithInitAndRlMutator
 from src.gen_algo.simple_model import GeneticAlgoSimple
 from src.optimizer.settings import GENERATOR_SETTINGS
@@ -23,6 +24,7 @@ ALGORITHM_NAMES = (
     "ga",
     "ga_with_rl_init",
     "ga_with_rl_mutator",
+    "ga_with_rl_tail_mutator",
     "ga_with_rl_init_and_mutator",
 )
 
@@ -104,6 +106,16 @@ def _build_algorithm(
         )
     if algorithm == "ga_with_rl_mutator":
         return GeneticAlgoWithRlMutator.from_model_path(
+            simulator=simulator,
+            environment=environment,
+            model_path=model_path,
+            requests_constrains=requests_constraints,
+            popul_size=population_size,
+            mutation_rate=mutation_rate,
+            retain_rate=retain_rate,
+        )
+    if algorithm == "ga_with_rl_tail_mutator":
+        return GeneticAlgoWithRlTailMutator.from_model_path(
             simulator=simulator,
             environment=environment,
             model_path=model_path,

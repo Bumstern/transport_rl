@@ -8,6 +8,7 @@ from src.gen_algo.compare_models import run_single_algorithm
 from src.gen_algo.compare_models import save_results
 from src.gen_algo.model_rl_init import GeneticAlgoWithRLInit
 from src.gen_algo.model_rl_mutator import GeneticAlgoWithRlMutator
+from src.gen_algo.model_rl_mutator import GeneticAlgoWithRlTailMutator
 from src.gen_algo.model_rl_mutator import GeneticAlgoWithInitAndRlMutator
 
 
@@ -110,6 +111,73 @@ def test_rl_mutator_only_gen_algo_from_model_path_returns_subclass(
     assert ga._rl_model is dummy_model
 
 
+def test_rl_tail_mutator_gen_algo_from_model_path_returns_subclass(
+    simulator,
+    environment,
+    requests_constraints,
+    monkeypatch,
+    tmp_path,
+) -> None:
+    model_path = tmp_path / "checkpoint.zip"
+    model_path.write_text("stub")
+    dummy_model = object()
+    monkeypatch.setattr(
+        "src.gen_algo.model_rl_init.MaskablePPO.load",
+        lambda path: dummy_model,
+    )
+
+    ga = GeneticAlgoWithRlTailMutator.from_model_path(
+        simulator=simulator,
+        environment=environment,
+        model_path=model_path,
+        requests_constrains=requests_constraints,
+    )
+
+    assert isinstance(ga, GeneticAlgoWithRlTailMutator)
+    assert ga._rl_model is dummy_model
+
+
+def test_rl_tail_mutator_rebuilds_tail_after_first_mutation(monkeypatch) -> None:
+    class DummyObsBuilder:
+        def __init__(self) -> None:
+            self.selection_calls = []
+            self.mask_calls = []
+
+        def create_observation(self, missed_requests_ids, current_selection):
+            self.selection_calls.append(list(current_selection))
+            return {"selection_len": len(current_selection)}
+
+        def create_action_mask(self, current_request_id):
+            self.mask_calls.append(current_request_id)
+            return [True, True, True]
+
+    class DummyModel:
+        def __init__(self) -> None:
+            self.actions = iter([2, 3, 4, 1])
+
+        def predict(self, obs, action_masks, deterministic):
+            return next(self.actions), None
+
+    ga = GeneticAlgoWithRlTailMutator(
+        simulator=None,  # type: ignore[arg-type]
+        rl_model=DummyModel(),
+        obs_builder=DummyObsBuilder(),
+        requests_constrains=[[-1, 0, 1]] * 4,
+        popul_size=4,
+        mutation_rate=1.0,
+        retain_rate=0.5,
+    )
+    individual = [9, 9, 9, 9]
+
+    monkeypatch.setattr("src.gen_algo.model_rl_mutator.random.random", lambda: 0.0)
+
+    mutated = ga._mutation(individual)
+
+    assert mutated == [1, 2, 3, 0]
+    assert ga._obs_builder.selection_calls == [[], [1], [1, 2], [1, 2, 3]]
+    assert ga._obs_builder.mask_calls == [0, 1, 2, 3]
+
+
 def test_build_fixed_test_instances_is_deterministic() -> None:
     first_instances = build_fixed_test_instances(2, seed=123)
     second_instances = build_fixed_test_instances(2, seed=123)
@@ -155,14 +223,15 @@ def test_save_results_writes_json_and_summary(tmp_path) -> None:
         AlgorithmRunResult("ga", 0, 10, 2, 10),
         AlgorithmRunResult("ga_with_rl_init", 0, 11, 1, 11),
         AlgorithmRunResult("ga_with_rl_mutator", 0, 11, 1, 11),
+        AlgorithmRunResult("ga_with_rl_tail_mutator", 0, 11, 1, 11),
         AlgorithmRunResult("ga_with_rl_init_and_mutator", 0, 12, 0, 12),
     ]
 
     save_results(output_path, results)
 
     payload = json.loads(output_path.read_text())
-    assert len(payload["results"]) == 4
-    assert len(payload["summary"]) == 4
+    assert len(payload["results"]) == 5
+    assert len(payload["summary"]) == 5
     assert payload["summary"][0]["algorithm"] == "ga"
 
 
@@ -172,6 +241,7 @@ def test_save_results_writes_csv(tmp_path) -> None:
         AlgorithmRunResult("ga", 0, 10, 2, 10),
         AlgorithmRunResult("ga_with_rl_init", 0, 11, 1, 11),
         AlgorithmRunResult("ga_with_rl_mutator", 0, 11, 1, 11),
+        AlgorithmRunResult("ga_with_rl_tail_mutator", 0, 11, 1, 11),
         AlgorithmRunResult("ga_with_rl_init_and_mutator", 0, 12, 0, 12),
     ]
 
@@ -188,6 +258,7 @@ def test_build_summary_includes_rl_mutator_variant() -> None:
         AlgorithmRunResult("ga", 0, 10, 2, 10),
         AlgorithmRunResult("ga_with_rl_init", 0, 11, 1, 11),
         AlgorithmRunResult("ga_with_rl_mutator", 0, 12, 0, 12),
+        AlgorithmRunResult("ga_with_rl_tail_mutator", 0, 8, 4, 8),
         AlgorithmRunResult("ga_with_rl_init_and_mutator", 0, 9, 3, 9),
     ]
 
@@ -197,5 +268,6 @@ def test_build_summary_includes_rl_mutator_variant() -> None:
         "ga",
         "ga_with_rl_init",
         "ga_with_rl_mutator",
+        "ga_with_rl_tail_mutator",
         "ga_with_rl_init_and_mutator",
     ]
