@@ -22,8 +22,9 @@ def input_generator() -> InputDataGenerator:
         simulator_start_date=datetime.strptime(GENERATOR_SETTINGS.simulator_start_date, '%d.%m.%Y'),
         simulator_end_date=datetime.strptime(GENERATOR_SETTINGS.simulator_end_date, '%d.%m.%Y'),
         capacities_variants=GENERATOR_SETTINGS.capacities_variants,
-        min_distance=GENERATOR_SETTINGS.min_distance,
-        max_distance=GENERATOR_SETTINGS.max_distance,
+        load_to_load_distance_range=GENERATOR_SETTINGS.load_to_load_distance_range.model_dump(),
+        unload_to_unload_distance_range=GENERATOR_SETTINGS.unload_to_unload_distance_range.model_dump(),
+        load_to_unload_distance_range=GENERATOR_SETTINGS.load_to_unload_distance_range.model_dump(),
         seed=42,
     )
 

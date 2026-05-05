@@ -23,8 +23,9 @@ def build_generator(seed: int | None = None) -> InputDataGenerator:
         simulator_start_date=datetime.strptime(GENERATOR_SETTINGS.simulator_start_date, "%d.%m.%Y"),
         simulator_end_date=datetime.strptime(GENERATOR_SETTINGS.simulator_end_date, "%d.%m.%Y"),
         capacities_variants=GENERATOR_SETTINGS.capacities_variants,
-        min_distance=GENERATOR_SETTINGS.min_distance,
-        max_distance=GENERATOR_SETTINGS.max_distance,
+        load_to_load_distance_range=GENERATOR_SETTINGS.load_to_load_distance_range.model_dump(),
+        unload_to_unload_distance_range=GENERATOR_SETTINGS.unload_to_unload_distance_range.model_dump(),
+        load_to_unload_distance_range=GENERATOR_SETTINGS.load_to_unload_distance_range.model_dump(),
         seed=seed,
     )
 
@@ -102,9 +103,10 @@ def main() -> None:
         "served_requests": served_requests,
         "missed_requests": len(missed_requests_ids),
         "missed_requests_ids": missed_requests_ids,
-        "best_genome": best_genome,
-        "truck_positions": [point.name for point in truck_positions],
-        "truck_available_times": truck_available_times,
+        "missed_ratio": len(missed_requests_ids) / environment.requests_num
+        # "best_genome": best_genome,
+        # "truck_positions": [point.name for point in truck_positions],
+        # "truck_available_times": truck_available_times,
     }
 
     print(json.dumps(result, ensure_ascii=False, indent=2))

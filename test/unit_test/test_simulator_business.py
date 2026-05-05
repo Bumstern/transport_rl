@@ -5,10 +5,6 @@ from src.simulator.model.simulator import Simulator
 def _build_route(point_from_name: str, point_to_name: str, distance: int) -> dict:
     return {
         "type": "Feature",
-        "geometry": {
-            "type": "LineString",
-            "coordinates": [[1, 1], [2, 2]],
-        },
         "properties": {
             "distance": distance,
             "points": [

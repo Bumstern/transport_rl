@@ -14,6 +14,12 @@ class EnvSettings(BaseSettings):
 
 
 class GeneratorSettings(BaseModel):
+    class DistanceRangeConfig(BaseModel):
+        min: int
+        max: int
+
+        model_config = ConfigDict(frozen=True)
+
     max_truck_num: int
     min_requests_num: int
     max_requests_num: int
@@ -22,8 +28,9 @@ class GeneratorSettings(BaseModel):
     load_point_names: list[str]
     unload_point_names: list[str]
     capacities_variants: list[int]
-    min_distance: int
-    max_distance: int
+    load_to_load_distance_range: DistanceRangeConfig
+    unload_to_unload_distance_range: DistanceRangeConfig
+    load_to_unload_distance_range: DistanceRangeConfig
 
     model_config = ConfigDict(frozen=True)
 

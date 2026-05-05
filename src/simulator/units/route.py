@@ -3,13 +3,6 @@ from pydantic import BaseModel, ConfigDict
 from src.simulator.units.point import RoutePoint
 
 
-class Geometry(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
-    type: str
-    coordinates: list[list[float]]
-
-
 class Properties(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -27,5 +20,4 @@ class Properties(BaseModel):
 
 class Route(BaseModel):
     type: str
-    geometry: Geometry
     properties: Properties

@@ -1,7 +1,6 @@
 import copy
 import datetime
 import json
-import math
 import os
 
 import numpy as np
@@ -19,8 +18,9 @@ class InputDataGenerator:
             simulator_start_date: datetime.datetime,
             simulator_end_date: datetime.datetime,
             capacities_variants: list[int],
-            min_distance: int,
-            max_distance: int,
+            load_to_load_distance_range: dict,
+            unload_to_unload_distance_range: dict,
+            load_to_unload_distance_range: dict,
             seed: int | None = None,
             routes_file_path: str = 'input/routes.json',
     ):
@@ -34,8 +34,18 @@ class InputDataGenerator:
         self._trucks_num = trucks_num
         self._capacities_variants = capacities_variants
         self._max_simulator_duration_in_hours = (simulator_end_date - simulator_start_date).days * 24
-        self._min_distance = min_distance
-        self._max_distance = max_distance
+        self._load_to_load_distance_range = dict(load_to_load_distance_range)
+        self._unload_to_unload_distance_range = dict(unload_to_unload_distance_range)
+        self._load_to_unload_distance_range = dict(load_to_unload_distance_range)
+        for distance_range in (
+            self._load_to_load_distance_range,
+            self._unload_to_unload_distance_range,
+            self._load_to_unload_distance_range,
+        ):
+            if "min" not in distance_range or "max" not in distance_range:
+                raise ValueError("Distance range must contain both 'min' and 'max'")
+            if distance_range["min"] > distance_range["max"]:
+                raise ValueError("Distance range min must be <= max")
         self._rng = np.random.default_rng(seed)
         self._routes_file_path = routes_file_path
         self._routes_data = self._load_or_create_routes()
@@ -59,57 +69,10 @@ class InputDataGenerator:
             json.dump(routes_data, f, indent=2)
         return routes_data
 
-    def _build_cluster_positions(
-            self,
-            point_names: list[str],
-            center_x: float,
-            center_y: float,
-            radius_min: float,
-            radius_max: float,
-    ) -> dict[str, tuple[float, float]]:
-        if len(point_names) == 0:
-            return {}
-
-        angle_offset = float(self._rng.uniform(0.0, 2.0 * math.pi))
-        positions = {}
-        for point_id, point_name in enumerate(point_names):
-            angle = angle_offset + (2.0 * math.pi * point_id / len(point_names))
-            radius = float(self._rng.uniform(radius_min, radius_max))
-            x = center_x + radius * math.cos(angle)
-            y = center_y + radius * math.sin(angle)
-            positions[point_name] = (x, y)
-        return positions
-
-    def _build_point_positions(self) -> dict[str, tuple[float, float]]:
-        load_positions = self._build_cluster_positions(
-            point_names=self._load_point_names,
-            center_x=0.0,
-            center_y=0.0,
-            radius_min=2200.0,
-            radius_max=2600.0,
-        )
-
-        unload_center_x = float(self._rng.uniform(
-            max(self._min_distance + 4500.0, 8000.0),
-            max(self._max_distance - 2500.0, self._min_distance + 5000.0),
-        ))
-        unload_positions = self._build_cluster_positions(
-            point_names=self._unload_point_names,
-            center_x=unload_center_x,
-            center_y=float(self._rng.uniform(-1200.0, 1200.0)),
-            radius_min=1200.0,
-            radius_max=2600.0,
-        )
-        return load_positions | unload_positions
-
     @staticmethod
     def _build_route(point_from_name: str, point_to_name: str, distance: int) -> dict:
         return {
             'type': 'Feature',
-            'geometry': {
-                'type': 'LineString',
-                'coordinates': [[1, 1], [2, 2]]
-            },
             'properties': {
                 'distance': distance,
                 'points': [
@@ -119,25 +82,29 @@ class InputDataGenerator:
             }
         }
 
-    def _calculate_distance(
-            self,
-            point_from: tuple[float, float],
-            point_to: tuple[float, float]
-    ) -> int:
-        euclidean_distance = math.dist(point_from, point_to)
-        noisy_distance = euclidean_distance * float(self._rng.uniform(0.95, 1.05))
-        return int(round(min(max(noisy_distance, self._min_distance), self._max_distance)))
+    def _sample_distance(self, distance_range: dict[str, int]) -> int:
+        return int(self._rng.integers(distance_range["min"], distance_range["max"] + 1))
+
+    def _resolve_distance_range(self, point_from_name: str, point_to_name: str) -> dict[str, int]:
+        point_from_is_load = point_from_name in self._load_point_names
+        point_to_is_load = point_to_name in self._load_point_names
+        if point_from_is_load and point_to_is_load:
+            return self._load_to_load_distance_range
+        if (not point_from_is_load) and (not point_to_is_load):
+            return self._unload_to_unload_distance_range
+        return self._load_to_unload_distance_range
 
     def _generate_logical_routes(self) -> list[dict]:
-        point_positions = self._build_point_positions()
         point_names = self._load_point_names + self._unload_point_names
 
         routes = []
         for point_from_id, point_from_name in enumerate(point_names):
             for point_to_name in point_names[point_from_id + 1:]:
-                distance = self._calculate_distance(
-                    point_positions[point_from_name],
-                    point_positions[point_to_name]
+                distance = self._sample_distance(
+                    self._resolve_distance_range(
+                        point_from_name=point_from_name,
+                        point_to_name=point_to_name,
+                    )
                 )
                 routes.append(self._build_route(point_from_name, point_to_name, distance))
         return routes
