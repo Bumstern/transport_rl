@@ -50,6 +50,7 @@ class AlgorithmRunResult:
     instance_id: int
     served_requests: int
     missed_requests: int
+    missed_ratio: float
     fitness: int
 
 
@@ -187,6 +188,7 @@ def run_single_algorithm(
         instance_id=instance_id,
         served_requests=served_requests,
         missed_requests=len(missed_requests),
+        missed_ratio=(len(missed_requests) / environment.requests_num),
         fitness=served_requests,
     )
 
@@ -229,7 +231,7 @@ def _format_table(rows: list[list[str]]) -> str:
 
 
 def print_results(results: list[AlgorithmRunResult]) -> None:
-    header = ["instance", "algorithm", "served", "missed", "fitness"]
+    header = ["instance", "algorithm", "served", "missed", "missed_ratio", "fitness"]
     rows = [header]
     for result in results:
         rows.append(
@@ -238,13 +240,14 @@ def print_results(results: list[AlgorithmRunResult]) -> None:
                 result.algorithm,
                 str(result.served_requests),
                 str(result.missed_requests),
+                f"{result.missed_ratio:.4f}",
                 str(result.fitness),
             ]
         )
     print("Per-instance results:")
     print(_format_table(rows))
 
-    summary_rows = [["algorithm", "avg_served", "avg_missed", "avg_fitness"]]
+    summary_rows = [["algorithm", "avg_served", "avg_missed", "avg_missed_ratio", "avg_fitness"]]
     for algorithm in ALGORITHM_NAMES:
         algorithm_results = [result for result in results if result.algorithm == algorithm]
         summary_rows.append(
@@ -252,6 +255,7 @@ def print_results(results: list[AlgorithmRunResult]) -> None:
                 algorithm,
                 f"{mean(result.served_requests for result in algorithm_results):.2f}",
                 f"{mean(result.missed_requests for result in algorithm_results):.2f}",
+                f"{mean(result.missed_ratio for result in algorithm_results):.4f}",
                 f"{mean(result.fitness for result in algorithm_results):.2f}",
             ]
         )
@@ -268,6 +272,7 @@ def build_summary(results: list[AlgorithmRunResult]) -> list[dict]:
                 "algorithm": algorithm,
                 "avg_served": mean(result.served_requests for result in algorithm_results),
                 "avg_missed": mean(result.missed_requests for result in algorithm_results),
+                "avg_missed_ratio": mean(result.missed_ratio for result in algorithm_results),
                 "avg_fitness": mean(result.fitness for result in algorithm_results),
             }
         )
@@ -291,7 +296,7 @@ def save_results(output_path: Path, results: list[AlgorithmRunResult]) -> None:
         with output_path.open("w", newline="") as f:
             writer = csv.DictWriter(
                 f,
-                fieldnames=["section", "instance_id", "algorithm", "served_requests", "missed_requests", "fitness"],
+                fieldnames=["section", "instance_id", "algorithm", "served_requests", "missed_requests", "missed_ratio", "fitness"],
             )
             writer.writeheader()
             for result in results:
@@ -302,6 +307,7 @@ def save_results(output_path: Path, results: list[AlgorithmRunResult]) -> None:
                         "algorithm": result.algorithm,
                         "served_requests": result.served_requests,
                         "missed_requests": result.missed_requests,
+                        "missed_ratio": result.missed_ratio,
                         "fitness": result.fitness,
                     }
                 )
@@ -313,6 +319,7 @@ def save_results(output_path: Path, results: list[AlgorithmRunResult]) -> None:
                         "algorithm": row["algorithm"],
                         "served_requests": row["avg_served"],
                         "missed_requests": row["avg_missed"],
+                        "missed_ratio": row["avg_missed_ratio"],
                         "fitness": row["avg_fitness"],
                     }
                 )

@@ -38,11 +38,13 @@ class Simulator:
             current_time: int,
             request_time: int,
             travel_time: int
-    ) -> bool:
-        if current_time + request_time + travel_time <= request.point_to_load.date_start_window:
-            return True
-        else:
-            return False
+    ) -> tuple[bool, int]:
+        arrival_time = current_time + request_time + travel_time
+        if arrival_time > request.point_to_load.date_end_window:
+            return False, 0
+
+        waiting_time = max(0, request.point_to_load.date_start_window - arrival_time)
+        return True, waiting_time
 
     def _cargo_process(
             self,
@@ -76,7 +78,7 @@ class Simulator:
             destination_point=next_point
         )
 
-        task_completed_flag = self.__check_truck_be_on_time_for_request(
+        task_completed_flag, waiting_time = self.__check_truck_be_on_time_for_request(
             request=request,
             current_time=current_time,
             request_time=request_time,
@@ -86,6 +88,7 @@ class Simulator:
         if task_completed_flag:
             truck.position.set_current_point(next_point)
             request_time += travel_time
+            request_time += waiting_time
             cargo_time = self._cargo_process(
                 truck=truck,
                 request=request,

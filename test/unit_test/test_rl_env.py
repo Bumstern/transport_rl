@@ -259,6 +259,77 @@ def test_rl_env_supports_observation_ablation_preset():
     assert info["unfinished_ratio"] == pytest.approx(np.array([0.0], dtype=np.float32))
 
 
+def test_request_simulation_waits_until_window_start(simulator: Simulator, environment: Environment) -> None:
+    request = None
+    truck = None
+    travel_time = None
+    for candidate_request in environment.requests:
+        for candidate_truck in environment.trucks:
+            candidate_truck = candidate_truck.model_copy(deep=True)
+            candidate_travel_time = environment.route_manager.calculate_travel_time_to_point(
+                truck=candidate_truck,
+                with_cargo=False,
+                request=candidate_request,
+                departure_point=candidate_truck.position.current_point,
+                destination_point=candidate_request.point_to_load,
+            )
+            if candidate_travel_time < candidate_request.point_to_load.date_start_window:
+                request = candidate_request
+                truck = candidate_truck
+                travel_time = candidate_travel_time
+                break
+        if request is not None:
+            break
+
+    assert request is not None
+    assert truck is not None
+    assert travel_time is not None
+
+    unload_time = environment.route_manager.calculate_travel_time_to_point(
+        truck=truck,
+        with_cargo=True,
+        request=request,
+        departure_point=request.point_to_load,
+        destination_point=request.point_to_unload,
+    ) + simulator._cargo_process(truck, request, is_loading_process=False)
+    load_time = simulator._cargo_process(truck, request, is_loading_process=True)
+    current_time = max(request.point_to_load.date_start_window - travel_time - 5, 0)
+
+    completed, total_time = simulator._request_simulation(
+        truck=truck,
+        request=request,
+        current_time=current_time,
+    )
+
+    waiting_time = request.point_to_load.date_start_window - (current_time + travel_time)
+    assert completed is True
+    assert waiting_time >= 0
+    assert total_time == travel_time + waiting_time + load_time + unload_time
+
+
+def test_request_simulation_rejects_arrival_after_window_end(simulator: Simulator, environment: Environment) -> None:
+    request = environment.requests[0]
+    truck = environment.trucks[0].model_copy(deep=True)
+
+    travel_time = environment.route_manager.calculate_travel_time_to_point(
+        truck=truck,
+        with_cargo=False,
+        request=request,
+        departure_point=truck.position.current_point,
+        destination_point=request.point_to_load,
+    )
+    current_time = request.point_to_load.date_end_window - travel_time + 1
+
+    completed, total_time = simulator._request_simulation(
+        truck=truck,
+        request=request,
+        current_time=current_time,
+    )
+
+    assert completed is False
+    assert total_time == 0
+
+
 def test_reset_with_same_seed_recreates_same_instance(rl_env: SimulatorEnv):
     first_observation, _ = rl_env.reset(seed=123)
     first_requests_num = rl_env._current_env.requests_num

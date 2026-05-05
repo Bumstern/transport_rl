@@ -240,6 +240,7 @@ def test_run_single_algorithm_returns_metrics(monkeypatch, input_generator) -> N
     assert result.instance_id == 0
     assert result.algorithm == "ga"
     assert result.missed_requests == len(input_data["requests"])
+    assert result.missed_ratio == 1.0
     assert result.served_requests == 0
     assert result.fitness == 0
 
@@ -247,12 +248,12 @@ def test_run_single_algorithm_returns_metrics(monkeypatch, input_generator) -> N
 def test_save_results_writes_json_and_summary(tmp_path) -> None:
     output_path = tmp_path / "results.json"
     results = [
-        AlgorithmRunResult("ga", 0, 10, 2, 10),
-        AlgorithmRunResult("ga_with_rl_init", 0, 11, 1, 11),
-        AlgorithmRunResult("ga_with_rl_mutator", 0, 11, 1, 11),
-        AlgorithmRunResult("ga_with_rl_tail_mutator", 0, 11, 1, 11),
-        AlgorithmRunResult("ga_with_rl_init_and_mutator", 0, 12, 0, 12),
-        AlgorithmRunResult("ga_with_rl_init_and_tail_mutator", 0, 12, 0, 12),
+        AlgorithmRunResult("ga", 0, 10, 2, 0.1667, 10),
+        AlgorithmRunResult("ga_with_rl_init", 0, 11, 1, 0.0833, 11),
+        AlgorithmRunResult("ga_with_rl_mutator", 0, 11, 1, 0.0833, 11),
+        AlgorithmRunResult("ga_with_rl_tail_mutator", 0, 11, 1, 0.0833, 11),
+        AlgorithmRunResult("ga_with_rl_init_and_mutator", 0, 12, 0, 0.0, 12),
+        AlgorithmRunResult("ga_with_rl_init_and_tail_mutator", 0, 12, 0, 0.0, 12),
     ]
 
     save_results(output_path, results)
@@ -261,35 +262,36 @@ def test_save_results_writes_json_and_summary(tmp_path) -> None:
     assert len(payload["results"]) == 6
     assert len(payload["summary"]) == 6
     assert payload["summary"][0]["algorithm"] == "ga"
+    assert "avg_missed_ratio" in payload["summary"][0]
 
 
 def test_save_results_writes_csv(tmp_path) -> None:
     output_path = tmp_path / "results.csv"
     results = [
-        AlgorithmRunResult("ga", 0, 10, 2, 10),
-        AlgorithmRunResult("ga_with_rl_init", 0, 11, 1, 11),
-        AlgorithmRunResult("ga_with_rl_mutator", 0, 11, 1, 11),
-        AlgorithmRunResult("ga_with_rl_tail_mutator", 0, 11, 1, 11),
-        AlgorithmRunResult("ga_with_rl_init_and_mutator", 0, 12, 0, 12),
-        AlgorithmRunResult("ga_with_rl_init_and_tail_mutator", 0, 12, 0, 12),
+        AlgorithmRunResult("ga", 0, 10, 2, 0.1667, 10),
+        AlgorithmRunResult("ga_with_rl_init", 0, 11, 1, 0.0833, 11),
+        AlgorithmRunResult("ga_with_rl_mutator", 0, 11, 1, 0.0833, 11),
+        AlgorithmRunResult("ga_with_rl_tail_mutator", 0, 11, 1, 0.0833, 11),
+        AlgorithmRunResult("ga_with_rl_init_and_mutator", 0, 12, 0, 0.0, 12),
+        AlgorithmRunResult("ga_with_rl_init_and_tail_mutator", 0, 12, 0, 0.0, 12),
     ]
 
     save_results(output_path, results)
 
     written = output_path.read_text()
-    assert "section,instance_id,algorithm,served_requests,missed_requests,fitness" in written
-    assert "result,0,ga,10,2,10" in written
+    assert "section,instance_id,algorithm,served_requests,missed_requests,missed_ratio,fitness" in written
+    assert "result,0,ga,10,2,0.1667,10" in written
     assert "summary,,ga," in written
 
 
 def test_build_summary_includes_rl_mutator_variant() -> None:
     results = [
-        AlgorithmRunResult("ga", 0, 10, 2, 10),
-        AlgorithmRunResult("ga_with_rl_init", 0, 11, 1, 11),
-        AlgorithmRunResult("ga_with_rl_mutator", 0, 12, 0, 12),
-        AlgorithmRunResult("ga_with_rl_tail_mutator", 0, 8, 4, 8),
-        AlgorithmRunResult("ga_with_rl_init_and_mutator", 0, 9, 3, 9),
-        AlgorithmRunResult("ga_with_rl_init_and_tail_mutator", 0, 13, 1, 13),
+        AlgorithmRunResult("ga", 0, 10, 2, 0.2, 10),
+        AlgorithmRunResult("ga_with_rl_init", 0, 11, 1, 0.1, 11),
+        AlgorithmRunResult("ga_with_rl_mutator", 0, 12, 0, 0.0, 12),
+        AlgorithmRunResult("ga_with_rl_tail_mutator", 0, 8, 4, 0.4, 8),
+        AlgorithmRunResult("ga_with_rl_init_and_mutator", 0, 9, 3, 0.3, 9),
+        AlgorithmRunResult("ga_with_rl_init_and_tail_mutator", 0, 13, 1, 0.1, 13),
     ]
 
     summary = build_summary(results)
