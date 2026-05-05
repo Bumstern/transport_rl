@@ -9,6 +9,7 @@ from pathlib import Path
 from statistics import mean
 
 import numpy as np
+from sb3_contrib import MaskablePPO
 
 from src.gen_algo.model_rl_init import GeneticAlgoWithRLInit
 from src.gen_algo.model_rl_mutator import GeneticAlgoWithRlMutator
@@ -16,12 +17,14 @@ from src.gen_algo.model_rl_mutator import GeneticAlgoWithRlTailMutator
 from src.gen_algo.model_rl_mutator import GeneticAlgoWithInitAndRlMutator
 from src.gen_algo.model_rl_mutator import GeneticAlgoWithInitAndRlTailMutator
 from src.gen_algo.simple_model import GeneticAlgoSimple
+from src.optimizer.main import SimulatorEnv
 from src.optimizer.settings import GENERATOR_SETTINGS
 from src.simulator.builder import get_env, get_requests_constraints
 from src.simulator.model.simulator import Simulator
 from src.simulator.utils.data_generator.generator import InputDataGenerator
 
 ALGORITHM_NAMES = (
+    "rl",
     "ga",
     "ga_with_rl_init",
     "ga_with_rl_mutator",
@@ -90,6 +93,8 @@ def _build_algorithm(
     mutation_rate: float,
     retain_rate: float,
 ):
+    if algorithm == "rl":
+        return None
     if algorithm == "ga":
         return GeneticAlgoSimple(
             simulator=simulator,
@@ -147,8 +152,44 @@ def _build_algorithm(
             popul_size=population_size,
             mutation_rate=mutation_rate,
             retain_rate=retain_rate,
-        )
+    )
     raise ValueError(f"Unknown algorithm: {algorithm}")
+
+
+def _run_rl_algorithm(
+    *,
+    input_data: dict,
+    routes_data: list[dict],
+    model_path: Path,
+) -> tuple[int, int]:
+    observation_feature_config = GeneticAlgoWithRLInit._load_observation_feature_config(model_path)
+    env = SimulatorEnv(
+        build_generator(seed=None),
+        observation_feature_config,
+        fixed_instances=[(input_data, routes_data)],
+    )
+    model = MaskablePPO.load(str(model_path))
+
+    observation, _ = env.reset()
+    terminated = False
+    last_info = None
+
+    while not terminated:
+        action_mask = env.action_masks()
+        action, _ = model.predict(
+            observation,
+            action_masks=action_mask,
+            deterministic=True,
+        )
+        observation, _, terminated, truncated, info = env.step(int(action))
+        last_info = info
+        if truncated:
+            raise RuntimeError("RL evaluation episode was truncated unexpectedly.")
+
+    assert last_info is not None, "RL evaluation finished without episode info."
+    missed_requests = int(last_info["missed_requests_num"])
+    served_requests = env._current_env.requests_num - missed_requests
+    return served_requests, missed_requests
 
 
 def run_single_algorithm(
@@ -164,7 +205,23 @@ def run_single_algorithm(
     seed: int,
 ) -> AlgorithmRunResult:
     _seed_everything(seed)
-    # print(f"Запустили {instance_id} для {algorithm}")
+    print(f"Запустили {instance_id} для {algorithm}")
+
+    if algorithm == "rl":
+        environment = get_env(input_data, routes_data)
+        served_requests, missed_requests = _run_rl_algorithm(
+            input_data=input_data,
+            routes_data=routes_data,
+            model_path=model_path,
+        )
+        return AlgorithmRunResult(
+            algorithm=algorithm,
+            instance_id=instance_id,
+            served_requests=served_requests,
+            missed_requests=missed_requests,
+            missed_ratio=(missed_requests / environment.requests_num),
+            fitness=served_requests,
+        )
 
     environment = get_env(input_data, routes_data)
     requests_constraints = get_requests_constraints(environment, with_missed=True)

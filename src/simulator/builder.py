@@ -1,3 +1,4 @@
+import copy
 import json
 
 from src.simulator.environment import Environment
@@ -12,6 +13,8 @@ def __open_file(file_path: str):
 
 
 def get_env(input_data: dict, routes_data: dict) -> Environment:
+    input_data = copy.deepcopy(input_data)
+    routes_data = copy.deepcopy(routes_data)
     # Переводим все даты в периоды
     time = Time(input_data['time']['simulator_start_date'], input_data['time']['simulator_end_date'])
     input_data = time.transition_to_periods(input_data)

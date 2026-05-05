@@ -6,6 +6,7 @@ from src.gen_algo.compare_models import build_fixed_test_instances
 from src.gen_algo.compare_models import build_summary
 from src.gen_algo.compare_models import run_single_algorithm
 from src.gen_algo.compare_models import save_results
+from src.simulator.builder import get_env
 from src.gen_algo.model_rl_init import GeneticAlgoWithRLInit
 from src.gen_algo.model_rl_mutator import GeneticAlgoWithRlMutator
 from src.gen_algo.model_rl_mutator import GeneticAlgoWithRlTailMutator
@@ -212,6 +213,17 @@ def test_build_fixed_test_instances_is_deterministic() -> None:
     assert first_instances == second_instances
 
 
+def test_get_env_does_not_mutate_input_data(input_generator) -> None:
+    input_data, routes_data = input_generator.generate_all(None)
+    original_start_date = input_data["time"]["simulator_start_date"]
+    original_end_date = input_data["time"]["simulator_end_date"]
+
+    get_env(input_data, routes_data)
+
+    assert input_data["time"]["simulator_start_date"] == original_start_date
+    assert input_data["time"]["simulator_end_date"] == original_end_date
+
+
 def test_run_single_algorithm_returns_metrics(monkeypatch, input_generator) -> None:
     input_data, routes_data = input_generator.generate_all(None)
 
@@ -229,7 +241,7 @@ def test_run_single_algorithm_returns_metrics(monkeypatch, input_generator) -> N
         instance_id=0,
         input_data=input_data,
         routes_data=routes_data,
-        model_path=Path("output/models/2026-04-24_13-12-29.zip"),
+        model_path=Path("output/models/best/best_model.zip"),
         ga_iterations=3,
         population_size=10,
         mutation_rate=0.1,
@@ -245,9 +257,38 @@ def test_run_single_algorithm_returns_metrics(monkeypatch, input_generator) -> N
     assert result.fitness == 0
 
 
+def test_run_single_algorithm_supports_rl(monkeypatch, input_generator) -> None:
+    input_data, routes_data = input_generator.generate_all(None)
+
+    monkeypatch.setattr(
+        "src.gen_algo.compare_models._run_rl_algorithm",
+        lambda **kwargs: (3, len(input_data["requests"]) - 3),
+    )
+
+    result = run_single_algorithm(
+        algorithm="rl",
+        instance_id=0,
+        input_data=input_data,
+        routes_data=routes_data,
+        model_path=Path("output/models/best/best_model.zip"),
+        ga_iterations=3,
+        population_size=10,
+        mutation_rate=0.1,
+        retain_rate=0.2,
+        seed=42,
+    )
+
+    assert result.instance_id == 0
+    assert result.algorithm == "rl"
+    assert result.served_requests == 3
+    assert result.missed_requests == len(input_data["requests"]) - 3
+    assert result.fitness == 3
+
+
 def test_save_results_writes_json_and_summary(tmp_path) -> None:
     output_path = tmp_path / "results.json"
     results = [
+        AlgorithmRunResult("rl", 0, 9, 3, 0.25, 9),
         AlgorithmRunResult("ga", 0, 10, 2, 0.1667, 10),
         AlgorithmRunResult("ga_with_rl_init", 0, 11, 1, 0.0833, 11),
         AlgorithmRunResult("ga_with_rl_mutator", 0, 11, 1, 0.0833, 11),
@@ -259,15 +300,16 @@ def test_save_results_writes_json_and_summary(tmp_path) -> None:
     save_results(output_path, results)
 
     payload = json.loads(output_path.read_text())
-    assert len(payload["results"]) == 6
-    assert len(payload["summary"]) == 6
-    assert payload["summary"][0]["algorithm"] == "ga"
+    assert len(payload["results"]) == 7
+    assert len(payload["summary"]) == 7
+    assert payload["summary"][0]["algorithm"] == "rl"
     assert "avg_missed_ratio" in payload["summary"][0]
 
 
 def test_save_results_writes_csv(tmp_path) -> None:
     output_path = tmp_path / "results.csv"
     results = [
+        AlgorithmRunResult("rl", 0, 9, 3, 0.25, 9),
         AlgorithmRunResult("ga", 0, 10, 2, 0.1667, 10),
         AlgorithmRunResult("ga_with_rl_init", 0, 11, 1, 0.0833, 11),
         AlgorithmRunResult("ga_with_rl_mutator", 0, 11, 1, 0.0833, 11),
@@ -280,12 +322,14 @@ def test_save_results_writes_csv(tmp_path) -> None:
 
     written = output_path.read_text()
     assert "section,instance_id,algorithm,served_requests,missed_requests,missed_ratio,fitness" in written
+    assert "result,0,rl,9,3,0.25,9" in written
     assert "result,0,ga,10,2,0.1667,10" in written
-    assert "summary,,ga," in written
+    assert "summary,,rl," in written
 
 
 def test_build_summary_includes_rl_mutator_variant() -> None:
     results = [
+        AlgorithmRunResult("rl", 0, 7, 5, 0.5, 7),
         AlgorithmRunResult("ga", 0, 10, 2, 0.2, 10),
         AlgorithmRunResult("ga_with_rl_init", 0, 11, 1, 0.1, 11),
         AlgorithmRunResult("ga_with_rl_mutator", 0, 12, 0, 0.0, 12),
@@ -297,6 +341,7 @@ def test_build_summary_includes_rl_mutator_variant() -> None:
     summary = build_summary(results)
 
     assert [row["algorithm"] for row in summary] == [
+        "rl",
         "ga",
         "ga_with_rl_init",
         "ga_with_rl_mutator",
