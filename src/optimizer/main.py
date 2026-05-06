@@ -24,6 +24,7 @@ class SimulatorEnv(gymnasium.Env):
             input_generator: InputDataGenerator,
             observation_feature_config: ObservationFeatureConfig = DEFAULT_OBSERVATION_FEATURES,
             fixed_instances: list[tuple[dict, list[dict]]] | None = None,
+            terminal_reward_multiplier: float = 0.0,
     ):
         # Пространство действий - это id машины [0, max_truck_num-1] + [-1]
         self.action_space = spaces.Discrete(GENERATOR_SETTINGS.max_truck_num+1)
@@ -37,6 +38,7 @@ class SimulatorEnv(gymnasium.Env):
         self._generator = input_generator
         self._fixed_instances = fixed_instances or []
         self._fixed_instance_cursor = 0
+        self._terminal_reward_multiplier = terminal_reward_multiplier
         self._max_selection_len = -1
         self._obs_builder = None
 
@@ -169,7 +171,8 @@ class SimulatorEnv(gymnasium.Env):
             action: ActType,
             observation_before_action: ObsType,
             current_selection: list[int],
-            missed_requests: list[int]
+            missed_requests: list[int],
+            terminated: bool,
     ) -> float:
         last_request_id = len(current_selection) - 1
         chosen_truck_id = self.__action_to_truck_id(action)
@@ -178,6 +181,9 @@ class SimulatorEnv(gymnasium.Env):
         else:
             reward = -1.0 if last_request_id in missed_requests else 1.0
             reward += self._get_slack_penalty_for_action(action, observation_before_action)
+        if terminated:
+            served_ratio = 1.0 - (len(missed_requests) / self._current_env.requests_num)
+            reward += self._terminal_reward_multiplier * served_ratio
         return reward
 
     def __action_to_truck_id(self, action: ActType):
@@ -216,16 +222,17 @@ class SimulatorEnv(gymnasium.Env):
         )
         self._current_observation = observation
 
+        # Проверяем нужно ли заканчивать предсказание
+        terminated = len(self._current_selection) >= self._current_env.requests_num
+
         # Считаем награду
         reward = self._calculate_reward(
             action,
             observation_before_action,
             self._current_selection,
-            missed_requests_ids
+            missed_requests_ids,
+            terminated,
         )
-
-        # Проверяем нужно ли заканчивать предсказание
-        terminated = len(self._current_selection) >= self._current_env.requests_num
 
         truncated = False
         info = {

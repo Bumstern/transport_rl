@@ -58,6 +58,7 @@ class TrainConfig:
     verbose: int
     observation_feature_config: ObservationFeatureConfig
     early_stop_patience_episodes: int
+    terminal_reward_multiplier: float
 
 
 class EpisodeLoggerCallback(BaseCallback):
@@ -273,11 +274,13 @@ def build_env(
     *,
     seed: int | None = None,
     fixed_instances: list[tuple[dict, list[dict]]] | None = None,
+    terminal_reward_multiplier: float = 0.0,
 ) -> SimulatorEnv:
     return SimulatorEnv(
         build_generator(seed=seed),
         observation_feature_config,
         fixed_instances=fixed_instances,
+        terminal_reward_multiplier=terminal_reward_multiplier,
     )
 
 
@@ -321,6 +324,7 @@ def serialize_train_config(config: TrainConfig) -> dict:
         "verbose": config.verbose,
         "observation_feature_config": config.observation_feature_config.model_dump(),
         "early_stop_patience_episodes": config.early_stop_patience_episodes,
+        "terminal_reward_multiplier": config.terminal_reward_multiplier,
     }
 
 
@@ -382,7 +386,11 @@ def train(config: TrainConfig) -> Path:
         fresh_seed=None if config.seed is None else config.seed + 10_000,
     )
     train_env = TrainPoolEnvWrapper(
-        build_env(config.observation_feature_config, seed=config.seed),
+        build_env(
+            config.observation_feature_config,
+            seed=config.seed,
+            terminal_reward_multiplier=config.terminal_reward_multiplier,
+        ),
         train_sampler,
     )
     eval_seed = None if config.seed is None else config.seed + 1
@@ -391,6 +399,7 @@ def train(config: TrainConfig) -> Path:
         config.observation_feature_config,
         seed=eval_seed,
         fixed_instances=eval_instances,
+        terminal_reward_multiplier=config.terminal_reward_multiplier,
     )
     model = load_or_build_model(config, train_env)
 
@@ -553,6 +562,12 @@ def parse_args() -> TrainConfig:
         default=0,
         help="Stop training if unfinished_ratio does not improve for this many completed episodes. 0 disables early stopping.",
     )
+    parser.add_argument(
+        "--terminal-reward-multiplier",
+        type=float,
+        default=0.0,
+        help="Terminal bonus multiplier applied to final served_ratio when an episode ends.",
+    )
     args = parser.parse_args()
 
     return TrainConfig(
@@ -580,6 +595,7 @@ def parse_args() -> TrainConfig:
             pairwise_lookahead_requests=args.pairwise_lookahead_requests,
         ),
         early_stop_patience_episodes=args.early_stop_patience_episodes,
+        terminal_reward_multiplier=args.terminal_reward_multiplier,
     )
 
 

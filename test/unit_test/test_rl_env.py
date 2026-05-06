@@ -72,8 +72,9 @@ def _assert_observation_is_valid(rl_env: SimulatorEnv, observation: dict) -> Non
 
 def _assert_reward_is_valid(reward: float) -> None:
     # Базовая часть награды теперь зависит от типа действия:
-    # skip -> -2, miss -> -1, success -> +1, плюс shaping по slack в диапазоне [-1, 1].
-    assert -3.0 <= reward <= 2.0
+    # skip -> -2, miss -> -1, success -> +1, плюс shaping по slack в диапазоне [-1, 1],
+    # и опциональный terminal bonus.
+    assert -3.0 <= reward <= 100.0
 
 
 def _copy_observation(observation: dict) -> dict:
@@ -259,6 +260,49 @@ def test_rl_env_supports_observation_ablation_preset():
     assert env.observation_space.contains(observation)
     assert "unfinished_ratio" in info
     assert info["unfinished_ratio"] == pytest.approx(np.array([0.0], dtype=np.float32))
+
+
+def test_terminal_reward_bonus_is_added_on_last_step_only(monkeypatch: pytest.MonkeyPatch) -> None:
+    generator = InputDataGenerator(
+        load_point_names=GENERATOR_SETTINGS.load_point_names,
+        unload_point_names=GENERATOR_SETTINGS.unload_point_names,
+        requests_num_min=GENERATOR_SETTINGS.min_requests_num,
+        requests_num_max=GENERATOR_SETTINGS.max_requests_num,
+        trucks_num=GENERATOR_SETTINGS.max_truck_num,
+        simulator_start_date=datetime.strptime(GENERATOR_SETTINGS.simulator_start_date, '%d.%m.%Y'),
+        simulator_end_date=datetime.strptime(GENERATOR_SETTINGS.simulator_end_date, '%d.%m.%Y'),
+        capacities_variants=GENERATOR_SETTINGS.capacities_variants,
+        load_to_load_distance_range=GENERATOR_SETTINGS.load_to_load_distance_range.model_dump(),
+        unload_to_unload_distance_range=GENERATOR_SETTINGS.unload_to_unload_distance_range.model_dump(),
+        load_to_unload_distance_range=GENERATOR_SETTINGS.load_to_unload_distance_range.model_dump(),
+        seed=42,
+    )
+    env = SimulatorEnv(generator, terminal_reward_multiplier=10.0)
+    observation, _ = env.reset(seed=42)
+    env._current_selection = [-1] * (env._current_env.requests_num - 1)
+    action_mask = env.action_masks()
+    action = int(next(action for action in np.flatnonzero(action_mask) if action != 0))
+    truck_id = action - 1
+
+    previous_observation = _copy_observation(observation)
+    previous_observation["earliness_to_window_start"][0][truck_id] = np.float32(0.0)
+    previous_observation["lateness_to_window_start"][0][truck_id] = np.float32(0.0)
+    env._current_observation = previous_observation
+
+    truck_positions = [truck.position.current_point.model_copy(deep=True) for truck in env._current_env.trucks]
+    truck_available_times = [0] * len(env._current_env.trucks)
+    monkeypatch.setattr(
+        env._simulator,
+        "run",
+        lambda selection, cur_env: ([], truck_positions, truck_available_times),
+    )
+
+    _, reward, terminated, truncated, info = env.step(action)
+
+    assert terminated is True
+    assert truncated is False
+    expected_served_ratio = 1.0 - (info["missed_requests_num"] / env._current_env.requests_num)
+    assert reward == pytest.approx(2.0 + 10.0 * expected_served_ratio)
 
 
 def test_request_simulation_waits_until_window_start(simulator: Simulator, environment: Environment) -> None:

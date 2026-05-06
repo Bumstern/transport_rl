@@ -67,6 +67,7 @@ def _build_train_config(**overrides) -> TrainConfig:
         verbose=1,
         observation_feature_config=DEFAULT_OBSERVATION_FEATURES,
         early_stop_patience_episodes=0,
+        terminal_reward_multiplier=0.0,
     )
     return replace(base_config, **overrides)
 
@@ -212,6 +213,7 @@ def test_build_env_cycles_over_fixed_instances() -> None:
         DEFAULT_OBSERVATION_FEATURES,
         seed=321,
         fixed_instances=fixed_instances,
+        terminal_reward_multiplier=1.5,
     )
 
     env.reset()
@@ -232,6 +234,7 @@ def test_build_env_cycles_over_fixed_instances() -> None:
 
     assert first_signature != second_signature
     assert cycled_signature == first_signature
+    assert env._terminal_reward_multiplier == pytest.approx(1.5)
 
 
 def test_get_observation_feature_config_applies_pairwise_lookahead() -> None:
@@ -257,6 +260,14 @@ def test_get_observation_feature_config_supports_no_time_windows_preset() -> Non
     assert config.use_next_request_tw is True
     assert config.use_pairwise_features is True
     assert config.pairwise_lookahead_requests == 2
+
+
+def test_serialize_train_config_includes_terminal_reward_multiplier() -> None:
+    config = _build_train_config(terminal_reward_multiplier=7.5)
+
+    serialized = serialize_train_config(config)
+
+    assert serialized["terminal_reward_multiplier"] == pytest.approx(7.5)
 
 
 def test_serialize_train_config_includes_resume_path() -> None:
