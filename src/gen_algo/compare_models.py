@@ -16,6 +16,10 @@ from src.gen_algo.model_rl_mutator import GeneticAlgoWithRlMutator
 from src.gen_algo.model_rl_mutator import GeneticAlgoWithRlTailMutator
 from src.gen_algo.model_rl_mutator import GeneticAlgoWithInitAndRlMutator
 from src.gen_algo.model_rl_mutator import GeneticAlgoWithInitAndRlTailMutator
+from src.gen_algo.model_rl_mutator import GeneticAlgoWithRlMissedRequestsMutator
+from src.gen_algo.model_rl_mutator import GeneticAlgoWithInitAndRlMissedRequestsMutator
+from src.gen_algo.model_rl_mutator import GeneticAlgoWithRlMissedRequestsAcceptedByFitnessMutator
+from src.gen_algo.model_rl_mutator import GeneticAlgoWithInitAndRlMissedRequestsAcceptedByFitnessMutator
 from src.gen_algo.simple_model import GeneticAlgoSimple
 from src.optimizer.main import SimulatorEnv
 from src.optimizer.settings import GENERATOR_SETTINGS
@@ -29,8 +33,12 @@ ALGORITHM_NAMES = (
     "ga_with_rl_init",
     "ga_with_rl_mutator",
     "ga_with_rl_tail_mutator",
+    "ga_with_rl_missed_requests_mutator",
+    "ga_with_rl_missed_requests_accepted_by_fitness_mutator",
     "ga_with_rl_init_and_mutator",
     "ga_with_rl_init_and_tail_mutator",
+    "ga_with_rl_init_and_missed_requests_mutator",
+    "ga_with_rl_init_and_missed_requests_accepted_by_fitness_mutator",
 )
 
 
@@ -133,6 +141,26 @@ def _build_algorithm(
             mutation_rate=mutation_rate,
             retain_rate=retain_rate,
         )
+    if algorithm == "ga_with_rl_missed_requests_mutator":
+        return GeneticAlgoWithRlMissedRequestsMutator.from_model_path(
+            simulator=simulator,
+            environment=environment,
+            model_path=model_path,
+            requests_constrains=requests_constraints,
+            popul_size=population_size,
+            mutation_rate=mutation_rate,
+            retain_rate=retain_rate,
+        )
+    if algorithm == "ga_with_rl_missed_requests_accepted_by_fitness_mutator":
+        return GeneticAlgoWithRlMissedRequestsAcceptedByFitnessMutator.from_model_path(
+            simulator=simulator,
+            environment=environment,
+            model_path=model_path,
+            requests_constrains=requests_constraints,
+            popul_size=population_size,
+            mutation_rate=mutation_rate,
+            retain_rate=retain_rate,
+        )
     if algorithm == "ga_with_rl_init_and_mutator":
         return GeneticAlgoWithInitAndRlMutator.from_model_path(
             simulator=simulator,
@@ -152,7 +180,27 @@ def _build_algorithm(
             popul_size=population_size,
             mutation_rate=mutation_rate,
             retain_rate=retain_rate,
-    )
+        )
+    if algorithm == "ga_with_rl_init_and_missed_requests_mutator":
+        return GeneticAlgoWithInitAndRlMissedRequestsMutator.from_model_path(
+            simulator=simulator,
+            environment=environment,
+            model_path=model_path,
+            requests_constrains=requests_constraints,
+            popul_size=population_size,
+            mutation_rate=mutation_rate,
+            retain_rate=retain_rate,
+        )
+    if algorithm == "ga_with_rl_init_and_missed_requests_accepted_by_fitness_mutator":
+        return GeneticAlgoWithInitAndRlMissedRequestsAcceptedByFitnessMutator.from_model_path(
+            simulator=simulator,
+            environment=environment,
+            model_path=model_path,
+            requests_constrains=requests_constraints,
+            popul_size=population_size,
+            mutation_rate=mutation_rate,
+            retain_rate=retain_rate,
+        )
     raise ValueError(f"Unknown algorithm: {algorithm}")
 
 

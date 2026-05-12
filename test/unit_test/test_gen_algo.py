@@ -12,6 +12,10 @@ from src.gen_algo.model_rl_mutator import GeneticAlgoWithRlMutator
 from src.gen_algo.model_rl_mutator import GeneticAlgoWithRlTailMutator
 from src.gen_algo.model_rl_mutator import GeneticAlgoWithInitAndRlMutator
 from src.gen_algo.model_rl_mutator import GeneticAlgoWithInitAndRlTailMutator
+from src.gen_algo.model_rl_mutator import GeneticAlgoWithRlMissedRequestsMutator
+from src.gen_algo.model_rl_mutator import GeneticAlgoWithInitAndRlMissedRequestsMutator
+from src.gen_algo.model_rl_mutator import GeneticAlgoWithRlMissedRequestsAcceptedByFitnessMutator
+from src.gen_algo.model_rl_mutator import GeneticAlgoWithInitAndRlMissedRequestsAcceptedByFitnessMutator
 
 
 def test_gen_algo_from_model_path_loads_observation_config(
@@ -165,6 +169,110 @@ def test_init_and_rl_tail_mutator_gen_algo_from_model_path_returns_subclass(
     assert ga._rl_model is dummy_model
 
 
+def test_rl_missed_requests_mutator_gen_algo_from_model_path_returns_subclass(
+    simulator,
+    environment,
+    requests_constraints,
+    monkeypatch,
+    tmp_path,
+) -> None:
+    model_path = tmp_path / "checkpoint.zip"
+    model_path.write_text("stub")
+    dummy_model = object()
+    monkeypatch.setattr(
+        "src.gen_algo.model_rl_init.MaskablePPO.load",
+        lambda path: dummy_model,
+    )
+
+    ga = GeneticAlgoWithRlMissedRequestsMutator.from_model_path(
+        simulator=simulator,
+        environment=environment,
+        model_path=model_path,
+        requests_constrains=requests_constraints,
+    )
+
+    assert isinstance(ga, GeneticAlgoWithRlMissedRequestsMutator)
+    assert ga._rl_model is dummy_model
+
+
+def test_init_and_rl_missed_requests_mutator_gen_algo_from_model_path_returns_subclass(
+    simulator,
+    environment,
+    requests_constraints,
+    monkeypatch,
+    tmp_path,
+) -> None:
+    model_path = tmp_path / "checkpoint.zip"
+    model_path.write_text("stub")
+    dummy_model = object()
+    monkeypatch.setattr(
+        "src.gen_algo.model_rl_init.MaskablePPO.load",
+        lambda path: dummy_model,
+    )
+
+    ga = GeneticAlgoWithInitAndRlMissedRequestsMutator.from_model_path(
+        simulator=simulator,
+        environment=environment,
+        model_path=model_path,
+        requests_constrains=requests_constraints,
+    )
+
+    assert isinstance(ga, GeneticAlgoWithInitAndRlMissedRequestsMutator)
+    assert ga._rl_model is dummy_model
+
+
+def test_rl_missed_requests_accepted_by_fitness_mutator_gen_algo_from_model_path_returns_subclass(
+    simulator,
+    environment,
+    requests_constraints,
+    monkeypatch,
+    tmp_path,
+) -> None:
+    model_path = tmp_path / "checkpoint.zip"
+    model_path.write_text("stub")
+    dummy_model = object()
+    monkeypatch.setattr(
+        "src.gen_algo.model_rl_init.MaskablePPO.load",
+        lambda path: dummy_model,
+    )
+
+    ga = GeneticAlgoWithRlMissedRequestsAcceptedByFitnessMutator.from_model_path(
+        simulator=simulator,
+        environment=environment,
+        model_path=model_path,
+        requests_constrains=requests_constraints,
+    )
+
+    assert isinstance(ga, GeneticAlgoWithRlMissedRequestsAcceptedByFitnessMutator)
+    assert ga._rl_model is dummy_model
+
+
+def test_init_and_rl_missed_requests_accepted_by_fitness_mutator_gen_algo_from_model_path_returns_subclass(
+    simulator,
+    environment,
+    requests_constraints,
+    monkeypatch,
+    tmp_path,
+) -> None:
+    model_path = tmp_path / "checkpoint.zip"
+    model_path.write_text("stub")
+    dummy_model = object()
+    monkeypatch.setattr(
+        "src.gen_algo.model_rl_init.MaskablePPO.load",
+        lambda path: dummy_model,
+    )
+
+    ga = GeneticAlgoWithInitAndRlMissedRequestsAcceptedByFitnessMutator.from_model_path(
+        simulator=simulator,
+        environment=environment,
+        model_path=model_path,
+        requests_constrains=requests_constraints,
+    )
+
+    assert isinstance(ga, GeneticAlgoWithInitAndRlMissedRequestsAcceptedByFitnessMutator)
+    assert ga._rl_model is dummy_model
+
+
 def test_rl_tail_mutator_rebuilds_tail_after_first_mutation(monkeypatch) -> None:
     class DummyObsBuilder:
         def __init__(self) -> None:
@@ -204,6 +312,130 @@ def test_rl_tail_mutator_rebuilds_tail_after_first_mutation(monkeypatch) -> None
     assert mutated == [1, 2, 3, 0]
     assert ga._obs_builder.selection_calls == [[], [1], [1, 2], [1, 2, 3]]
     assert ga._obs_builder.mask_calls == [0, 1, 2, 3]
+
+
+def test_rl_missed_requests_mutator_updates_only_missed_requests_sequentially(monkeypatch) -> None:
+    class DummyObsBuilder:
+        def __init__(self) -> None:
+            self.selection_calls = []
+            self.missed_calls = []
+            self.mask_calls = []
+
+        def create_observation(self, missed_requests_ids, current_selection):
+            self.selection_calls.append(list(current_selection))
+            self.missed_calls.append(list(missed_requests_ids))
+            return {"selection_len": len(current_selection)}
+
+        def create_action_mask(self, current_request_id):
+            self.mask_calls.append(current_request_id)
+            return [True, True, True]
+
+    class DummyModel:
+        def __init__(self) -> None:
+            self.actions = iter([2, 1])
+
+        def predict(self, obs, action_masks, deterministic):
+            return next(self.actions), None
+
+    class DummySimulator:
+        def run(self, selection):
+            assert list(selection) == [9, 9, 9, 9]
+            return [1, 3], None, None
+
+    ga = GeneticAlgoWithRlMissedRequestsMutator(
+        simulator=DummySimulator(),
+        rl_model=DummyModel(),
+        obs_builder=DummyObsBuilder(),
+        requests_constrains=[[-1, 0, 1]] * 4,
+        popul_size=4,
+        mutation_rate=1.0,
+        retain_rate=0.5,
+    )
+
+    monkeypatch.setattr("src.gen_algo.model_rl_mutator.random.random", lambda: 0.0)
+
+    mutated = ga._mutation([9, 9, 9, 9])
+
+    assert mutated == [9, 1, 9, 0]
+    assert ga._obs_builder.selection_calls == [[9], [9, 1, 9]]
+    assert ga._obs_builder.missed_calls == [[], []]
+    assert ga._obs_builder.mask_calls == [1, 3]
+
+
+def test_rl_missed_requests_mutator_can_keep_original_individual_via_hook(monkeypatch) -> None:
+    class DummyObsBuilder:
+        def create_observation(self, missed_requests_ids, current_selection):
+            return {}
+
+        def create_action_mask(self, current_request_id):
+            return [True, True, True]
+
+    class DummyModel:
+        def predict(self, obs, action_masks, deterministic):
+            return 2, None
+
+    class DummySimulator:
+        def run(self, selection):
+            return [1], None, None
+
+    class RejectingMutator(GeneticAlgoWithRlMissedRequestsMutator):
+        def _select_mutation_result(self, original_individual, mutated_individual):
+            return original_individual
+
+    ga = RejectingMutator(
+        simulator=DummySimulator(),
+        rl_model=DummyModel(),
+        obs_builder=DummyObsBuilder(),
+        requests_constrains=[[-1, 0, 1]] * 3,
+        popul_size=4,
+        mutation_rate=1.0,
+        retain_rate=0.5,
+    )
+
+    monkeypatch.setattr("src.gen_algo.model_rl_mutator.random.random", lambda: 0.0)
+
+    original = [9, 9, 9]
+    mutated = ga._mutation(original)
+
+    assert mutated == original
+
+
+def test_rl_missed_requests_accepted_by_fitness_mutator_keeps_only_improving_result(monkeypatch) -> None:
+    class DummyObsBuilder:
+        def create_observation(self, missed_requests_ids, current_selection):
+            return {}
+
+        def create_action_mask(self, current_request_id):
+            return [True, True, True]
+
+    class DummyModel:
+        def predict(self, obs, action_masks, deterministic):
+            return 2, None
+
+    class DummySimulator:
+        def run(self, selection):
+            selection = list(selection)
+            if selection == [9, 9, 9]:
+                return [1], None, None
+            if selection == [9, 1, 9]:
+                return [], None, None
+            raise AssertionError(f"Unexpected selection: {selection}")
+
+    ga = GeneticAlgoWithRlMissedRequestsAcceptedByFitnessMutator(
+        simulator=DummySimulator(),
+        rl_model=DummyModel(),
+        obs_builder=DummyObsBuilder(),
+        requests_constrains=[[-1, 0, 1]] * 3,
+        popul_size=4,
+        mutation_rate=1.0,
+        retain_rate=0.5,
+    )
+
+    monkeypatch.setattr("src.gen_algo.model_rl_mutator.random.random", lambda: 0.0)
+
+    mutated = ga._mutation([9, 9, 9])
+
+    assert mutated == [9, 1, 9]
 
 
 def test_build_fixed_test_instances_is_deterministic() -> None:
@@ -293,15 +525,19 @@ def test_save_results_writes_json_and_summary(tmp_path) -> None:
         AlgorithmRunResult("ga_with_rl_init", 0, 11, 1, 0.0833, 11),
         AlgorithmRunResult("ga_with_rl_mutator", 0, 11, 1, 0.0833, 11),
         AlgorithmRunResult("ga_with_rl_tail_mutator", 0, 11, 1, 0.0833, 11),
+        AlgorithmRunResult("ga_with_rl_missed_requests_mutator", 0, 12, 0, 0.0, 12),
+        AlgorithmRunResult("ga_with_rl_missed_requests_accepted_by_fitness_mutator", 0, 12, 0, 0.0, 12),
         AlgorithmRunResult("ga_with_rl_init_and_mutator", 0, 12, 0, 0.0, 12),
         AlgorithmRunResult("ga_with_rl_init_and_tail_mutator", 0, 12, 0, 0.0, 12),
+        AlgorithmRunResult("ga_with_rl_init_and_missed_requests_mutator", 0, 12, 0, 0.0, 12),
+        AlgorithmRunResult("ga_with_rl_init_and_missed_requests_accepted_by_fitness_mutator", 0, 12, 0, 0.0, 12),
     ]
 
     save_results(output_path, results)
 
     payload = json.loads(output_path.read_text())
-    assert len(payload["results"]) == 7
-    assert len(payload["summary"]) == 7
+    assert len(payload["results"]) == 11
+    assert len(payload["summary"]) == 11
     assert payload["summary"][0]["algorithm"] == "rl"
     assert "avg_missed_ratio" in payload["summary"][0]
 
@@ -314,8 +550,12 @@ def test_save_results_writes_csv(tmp_path) -> None:
         AlgorithmRunResult("ga_with_rl_init", 0, 11, 1, 0.0833, 11),
         AlgorithmRunResult("ga_with_rl_mutator", 0, 11, 1, 0.0833, 11),
         AlgorithmRunResult("ga_with_rl_tail_mutator", 0, 11, 1, 0.0833, 11),
+        AlgorithmRunResult("ga_with_rl_missed_requests_mutator", 0, 12, 0, 0.0, 12),
+        AlgorithmRunResult("ga_with_rl_missed_requests_accepted_by_fitness_mutator", 0, 12, 0, 0.0, 12),
         AlgorithmRunResult("ga_with_rl_init_and_mutator", 0, 12, 0, 0.0, 12),
         AlgorithmRunResult("ga_with_rl_init_and_tail_mutator", 0, 12, 0, 0.0, 12),
+        AlgorithmRunResult("ga_with_rl_init_and_missed_requests_mutator", 0, 12, 0, 0.0, 12),
+        AlgorithmRunResult("ga_with_rl_init_and_missed_requests_accepted_by_fitness_mutator", 0, 12, 0, 0.0, 12),
     ]
 
     save_results(output_path, results)
@@ -334,8 +574,12 @@ def test_build_summary_includes_rl_mutator_variant() -> None:
         AlgorithmRunResult("ga_with_rl_init", 0, 11, 1, 0.1, 11),
         AlgorithmRunResult("ga_with_rl_mutator", 0, 12, 0, 0.0, 12),
         AlgorithmRunResult("ga_with_rl_tail_mutator", 0, 8, 4, 0.4, 8),
+        AlgorithmRunResult("ga_with_rl_missed_requests_mutator", 0, 10, 2, 0.2, 10),
+        AlgorithmRunResult("ga_with_rl_missed_requests_accepted_by_fitness_mutator", 0, 11, 1, 0.1, 11),
         AlgorithmRunResult("ga_with_rl_init_and_mutator", 0, 9, 3, 0.3, 9),
         AlgorithmRunResult("ga_with_rl_init_and_tail_mutator", 0, 13, 1, 0.1, 13),
+        AlgorithmRunResult("ga_with_rl_init_and_missed_requests_mutator", 0, 11, 1, 0.1, 11),
+        AlgorithmRunResult("ga_with_rl_init_and_missed_requests_accepted_by_fitness_mutator", 0, 12, 0, 0.0, 12),
     ]
 
     summary = build_summary(results)
@@ -346,6 +590,10 @@ def test_build_summary_includes_rl_mutator_variant() -> None:
         "ga_with_rl_init",
         "ga_with_rl_mutator",
         "ga_with_rl_tail_mutator",
+        "ga_with_rl_missed_requests_mutator",
+        "ga_with_rl_missed_requests_accepted_by_fitness_mutator",
         "ga_with_rl_init_and_mutator",
         "ga_with_rl_init_and_tail_mutator",
+        "ga_with_rl_init_and_missed_requests_mutator",
+        "ga_with_rl_init_and_missed_requests_accepted_by_fitness_mutator",
     ]
